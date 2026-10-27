@@ -13,7 +13,8 @@ use std::collections::VecDeque;
 pub struct InputSample {
     /// Decoded input.
     pub state: InputState,
-    /// Wrapping microsecond timestamp of the IMU sample.
+    /// Wrapping microsecond timestamp of the sample; the bridge uses time since the
+    /// connection's input subscription started, not a controller clock.
     pub motion_timestamp_us: u32,
     /// Increments with every new input; identifies it in latency statistics.
     pub seq: u64,
@@ -204,7 +205,7 @@ impl Ns2ProDevice {
         self.bulk.push_back(r);
         event
     }
-    /// Takes the whole next queued bulk response.
+    /// Takes all remaining bytes of the next queued bulk response.
     pub fn pop_bulk_in(&mut self) -> Option<Vec<u8>> {
         self.read_bulk_in(usize::MAX)
     }

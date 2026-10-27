@@ -153,7 +153,7 @@ pub struct Completion<'a> {
     pub command: u16,
     /// Management status; 0 is success.
     pub status: u8,
-    /// Return parameters, empty for Command Status.
+    /// Payload after the status; empty for a conforming Command Status.
     pub data: &'a [u8],
 }
 /// Extracts a Command Complete or Command Status event; other events yield `None`.
@@ -268,11 +268,11 @@ pub fn adapter_info(p: &[u8]) -> Result<AdapterInfo, Malformed> {
 /// A Device Found event.
 #[derive(Debug)]
 pub struct Found<'a> {
-    /// The device.
+    /// Address and address type of the advertising device.
     pub device: Device,
-    /// Received signal strength, in dBm.
+    /// Received signal strength in dBm; 127 means unavailable.
     pub rssi: i8,
-    /// Device Found flags.
+    /// Device Found flags, as defined by the Linux management API.
     pub flags: u32,
     /// Extended inquiry response or advertising data.
     pub eir: &'a [u8],

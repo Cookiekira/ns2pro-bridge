@@ -1,8 +1,8 @@
-//! Command-line options.
+//! Command-line parsing.
 use clap::Parser;
 use ns2pro_proto::Address;
 use std::path::PathBuf;
-/// Command-line options.
+/// Options as supplied; [`Options::cache_file`] resolves the effective cache path.
 #[derive(Clone, Debug, Parser)]
 #[expect(
     clippy::struct_excessive_bools,

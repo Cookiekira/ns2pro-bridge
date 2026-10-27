@@ -13,14 +13,14 @@ pub struct Effects {
     pub outputs: Vec<Output>,
     /// Interrupt-IN completions since the last [`Self::take_completion_stats`].
     pub input_completions: u64,
-    /// How many of those completions repeated an unchanged report.
+    /// How many of those re-encoded the current input without a new sample.
     pub keepalives: u64,
-    /// Sequence number of the newest sample delivered to the host.
+    /// Sequence number of the sample in the newest completion appended to `replies`.
     pub completed_sample_seq: Option<u64>,
 }
 impl Effects {
-    /// Returns and resets `(sample seq, completions, keepalives)` once a sample
-    /// has been delivered.
+    /// Returns and resets `(sample seq, completions, keepalives)` once a
+    /// completion carrying a sample has been appended.
     pub fn take_completion_stats(&mut self) -> Option<(u64, u64, u64)> {
         let completions = std::mem::take(&mut self.input_completions);
         let keepalives = std::mem::take(&mut self.keepalives);

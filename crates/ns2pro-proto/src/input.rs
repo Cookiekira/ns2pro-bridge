@@ -171,9 +171,9 @@ pub fn pack_stick12(x: u16, y: u16) -> [u8; 3] {
 pub struct InputState {
     /// Pressed buttons.
     pub buttons: Buttons,
-    /// Calibrated left stick.
+    /// Left stick, normalized with calibration when available.
     pub left_stick: Stick,
-    /// Calibrated right stick.
+    /// Right stick, normalized with calibration when available.
     pub right_stick: Stick,
     /// Accelerometer X, Y, Z.
     pub accel: [i16; 3],

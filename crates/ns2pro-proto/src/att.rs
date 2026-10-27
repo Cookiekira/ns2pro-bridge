@@ -431,7 +431,8 @@ pub enum Packet<'a> {
         /// First handle in the request, or 0 when the PDU has none.
         handle: u16,
     },
-    /// A response, including an Error Response, to the bridge's outstanding request.
+    /// A response or Error Response opcode, classified without checking which
+    /// request is outstanding or validating its body.
     Response(&'a [u8]),
     /// A command, confirmation or other PDU that needs no action.
     Ignore,

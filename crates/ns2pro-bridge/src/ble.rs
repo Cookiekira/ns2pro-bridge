@@ -37,9 +37,10 @@ pub enum PreferenceOutcome {
     Unavailable,
     /// The controller or platform rejected the request.
     Refused,
-    /// The request was sent, but taking effect was not observed.
+    /// The outcome is unknown; the request may not even have been submitted.
     Unconfirmed,
-    /// The request was confirmed.
+    /// On Linux, the controller reported the requested interval in effect; on
+    /// Windows, the preference request succeeded, which fixes no interval.
     Confirmed,
 }
 

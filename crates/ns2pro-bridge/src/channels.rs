@@ -38,7 +38,8 @@ pub struct Channels {
     pub input: watch::Sender<InputSample>,
     /// Player LED mask requested by the host.
     pub leds: watch::Sender<u8>,
-    /// Latest host rumble; `None` when nothing is pending.
+    /// Latest host rumble; it stays set after being written. `None` means no rumble
+    /// since the last reset.
     pub rumble: watch::Sender<Option<Rumble>>,
     /// Identity block for the USB device.
     pub identity: watch::Sender<Identity>,

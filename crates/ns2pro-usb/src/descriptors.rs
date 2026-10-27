@@ -9,9 +9,9 @@ pub const CONFIG_DESC_FULL: &[u8] = &[
     129, 3, 64, 0, 4, 7, 5, 1, 3, 64, 0, 4, 9, 4, 1, 0, 2, 255, 0, 0, 6, 7, 5, 2, 2, 64, 0, 0, 7,
     5, 130, 2, 64, 0, 0,
 ];
-/// HID class descriptor.
+/// HID class descriptor of the single HID interface.
 pub const HID_DESC: &[u8] = &[9, 33, 17, 1, 0, 1, 34, 97, 0];
-/// HID report descriptor.
+/// HID report descriptor, as exported by VIIPER.
 pub const HID_REPORT_DESC: &[u8] = &[
     5, 1, 9, 5, 161, 1, 133, 5, 5, 255, 9, 1, 21, 0, 38, 255, 0, 149, 63, 117, 8, 129, 2, 133, 9,
     9, 1, 149, 2, 129, 2, 5, 9, 25, 1, 41, 21, 37, 1, 149, 21, 117, 1, 129, 2, 149, 1, 117, 3, 129,

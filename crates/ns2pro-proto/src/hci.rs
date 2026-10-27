@@ -94,7 +94,7 @@ pub enum Event<'a> {
     Updated(u16, u8, Option<Parameters>),
     /// Command Status or Command Complete for LE Connection Update, carrying its status.
     CommandStatus(u8),
-    /// Any other event, or a connection event with a failure status.
+    /// Any other event, including a failed LE Connection Complete.
     Other,
 }
 /// Parses an HCI event packet, including its `0x04` packet indicator.

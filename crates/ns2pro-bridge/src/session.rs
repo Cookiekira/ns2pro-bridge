@@ -27,7 +27,8 @@ pub enum SessionError {
 /// How one connection attempt went.
 #[derive(Debug)]
 pub struct AttemptOutcome {
-    /// Pairing completed during this attempt.
+    /// Pairing state carried across attempts: true if it was already true on entry
+    /// or pairing completed during this attempt.
     pub paired: bool,
     /// The controller was initialized, paired if needed, and cached.
     pub established: bool,

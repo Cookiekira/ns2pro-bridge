@@ -81,7 +81,7 @@ pub fn response_payload(response: &[u8], cmd: u8, sub: u8) -> Result<&[u8], Resp
     Ok(payload)
 }
 
-/// Sets the player LEDs to `mask`.
+/// Builds a command that sets the player LEDs to `mask`.
 #[must_use]
 pub fn set_player_leds(mask: u8) -> Vec<u8> {
     command(0x09, 0x07, &[mask, 0, 0, 0, 0, 0, 0, 0])
@@ -93,13 +93,14 @@ pub fn set_feature_mask(mask: u8) -> Vec<u8> {
     command(0x0C, 0x02, &[mask, 0, 0, 0])
 }
 
-/// Enables the reports in `flags`, limited by any [`set_feature_mask`] mask.
+/// Builds a command enabling the reports in `flags`, limited by any
+/// [`set_feature_mask`] mask.
 #[must_use]
 pub fn enable_features(flags: u8) -> Vec<u8> {
     command(0x0C, 0x04, &[flags, 0, 0, 0])
 }
 
-/// Reads `size` bytes of SPI flash at `address`.
+/// Builds a command reading `size` bytes of SPI flash at `address`.
 #[must_use]
 pub fn spi_read(address: u32, size: u8) -> Vec<u8> {
     let mut payload = [0u8; 8];

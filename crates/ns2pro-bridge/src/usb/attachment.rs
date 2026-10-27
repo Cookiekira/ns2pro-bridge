@@ -12,7 +12,7 @@ pub enum Error {
     Setup(io::Error),
     /// Serving USB/IP failed.
     Transport(io::Error),
-    /// Attaching the virtual device failed.
+    /// Attaching or releasing the virtual device failed.
     Attach(AttachError),
 }
 /// The virtual USB device's transport: a USB/IP listener, the Linux vhci driver,

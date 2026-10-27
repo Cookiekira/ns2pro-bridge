@@ -169,7 +169,7 @@ impl Attached {
             "vhci ports were claimed concurrently; retry attach".into(),
         ))
     }
-    /// The vhci port this lease occupies.
+    /// The vhci port assigned to this lease.
     #[must_use]
     pub const fn port(&self) -> u32 {
         self.port

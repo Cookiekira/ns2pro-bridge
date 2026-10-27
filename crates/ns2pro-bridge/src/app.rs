@@ -15,7 +15,7 @@ pub enum AppError {
     /// Attaching the virtual USB device failed.
     #[error(transparent)]
     Attach(#[from] AttachError),
-    /// USB setup failed.
+    /// Binding the USB/IP listener or loading the vhci driver failed.
     #[error("USB setup: {0}")]
     UsbSetup(std::io::Error),
     /// The USB transport ended.

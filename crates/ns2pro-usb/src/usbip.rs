@@ -12,7 +12,7 @@ pub struct Urb {
     pub command: u32,
     /// Request sequence number, echoed in the reply.
     pub seq: u32,
-    /// Device ID.
+    /// Device ID, echoed in the reply; not validated.
     pub devid: u32,
     /// 0 for OUT, 1 for IN.
     pub direction: u32,
@@ -81,7 +81,8 @@ impl Urb {
             unlink_seq: word(unlink_seq),
         })
     }
-    /// Encodes the header; the inverse of [`Self::decode`].
+    /// Encodes the header. `unlink_seq` is written only for unlink, fields that
+    /// [`Self::decode`] does not keep are zero, and `length` keeps its low 32 bits.
     #[must_use]
     pub fn header(self) -> [u8; 48] {
         let unlink_seq = if self.command == 2 {

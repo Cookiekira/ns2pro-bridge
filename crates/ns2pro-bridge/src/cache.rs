@@ -1,4 +1,5 @@
-//! Remembers the last controller so reconnects can skip discovery.
+//! Remembers the last controller so later runs target it. A fresh advertisement
+//! is still required before connecting.
 use crate::{ble::BleError, session::SessionError};
 use ns2pro_proto::Address;
 use serde::{Deserialize, Serialize};

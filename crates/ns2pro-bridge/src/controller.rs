@@ -20,10 +20,10 @@ pub enum ControllerError {
     /// The GATT link failed.
     #[error(transparent)]
     Link(#[from] LinkError),
-    /// A command response was malformed.
+    /// A command response was malformed or answered another command.
     #[error(transparent)]
     Response(#[from] command::ResponseError),
-    /// Pairing failed.
+    /// The controller rejected pairing or its confirmation did not match.
     #[error(transparent)]
     Pairing(#[from] PairingError),
     /// Shutdown cancelled the operation.

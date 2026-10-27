@@ -54,11 +54,12 @@ pub enum WireError {
     ZeroPort,
     /// The host is unspecified or too long for the request.
     InvalidHost,
-    /// The driver's response has the wrong size or a non-positive port.
+    /// A plugin response with the wrong size or a non-positive port, or a
+    /// non-positive port passed to [`plugout`].
     InvalidResponse {
-        /// Bytes the driver returned.
+        /// Response size in bytes (8 for a rejected [`plugout`] port).
         bytes: u32,
-        /// Port the driver reported.
+        /// The offending port.
         port: i32,
     },
 }
