@@ -33,12 +33,12 @@ use windows::{
     core::{Interface, Ref},
 };
 
-fn ble(error: windows::core::Error) -> BleError {
+fn ble(error: impl std::fmt::Display) -> BleError {
     BleError::Platform(format!(
         "{error}; check Bluetooth adapter power and Windows Bluetooth permissions"
     ))
 }
-fn link(error: windows::core::Error) -> LinkError {
+fn link(error: impl std::fmt::Display) -> LinkError {
     LinkError::Platform(error.to_string())
 }
 
@@ -71,11 +71,13 @@ fn with_buffer<T>(buffer: &IBuffer, consume: impl FnOnce(&[u8]) -> T) -> windows
         return Ok(consume(&[]));
     }
     let access: IBufferByteAccess = buffer.cast()?;
+    // SAFETY: IBufferByteAccess::Buffer has no preconditions; it returns the backing
+    // storage of the live buffer, which is checked for null below.
     let pointer = unsafe { access.Buffer()? };
     if pointer.is_null() {
-        return Err(windows::core::Error::from_hresult(windows::core::HRESULT(
-            0x80004003u32 as i32,
-        )));
+        return Err(windows::core::Error::from_hresult(
+            windows::Win32::Foundation::E_POINTER,
+        ));
     }
     // SAFETY: IBufferByteAccess exposes Length initialized bytes owned by buffer;
     // neither the slice nor its pointer escapes the synchronous consumer.
@@ -89,6 +91,11 @@ pub struct WindowsBluetooth {
     adapter: BluetoothAdapter,
 }
 impl WindowsBluetooth {
+    /// Opens the default adapter.
+    ///
+    /// # Errors
+    ///
+    /// When there is no default adapter or it does not support Bluetooth LE.
     pub async fn new() -> Result<Self, BleError> {
         // Apartment initialization belongs to rt::windows::RuntimeGuard.
         let adapter = winrt!(BluetoothAdapter::GetDefaultAsync(), ble)?;
@@ -101,6 +108,10 @@ impl WindowsBluetooth {
     }
 
     /// Enumerate adapters, then scan for 500 ms without requiring any controller.
+    ///
+    /// # Errors
+    ///
+    /// When enumeration fails or the watcher does not start and stop cleanly.
     pub async fn smoke_test(&self) -> Result<(), BleError> {
         use std::sync::atomic::{AtomicU64, Ordering};
         use windows::Devices::{
@@ -112,7 +123,7 @@ impl WindowsBluetooth {
         for adapter in adapters {
             tracing::info!(id = %adapter.Id().map_err(ble)?, name = %adapter.Name().map_err(ble)?, "Bluetooth adapter");
         }
-        let mut scope = Watcher::new()?;
+        let mut scope = WatcherScope::new()?;
         let observed = Arc::new(AtomicU64::new(0));
         let callback_observed = observed.clone();
         scope.received = Some(
@@ -129,7 +140,7 @@ impl WindowsBluetooth {
             scope
                 .watcher
                 .Stopped(&TypedEventHandler::new(
-                    move |_, args: Ref<BluetoothLEAdvertisementWatcherStoppedEventArgs>| {
+                    move |_, args: Ref<'_, BluetoothLEAdvertisementWatcherStoppedEventArgs>| {
                         let reason = args.as_ref().and_then(|a| a.Error().ok());
                         let _ = tx.try_send(reason);
                         Ok(())
@@ -164,12 +175,12 @@ impl WindowsBluetooth {
         Ok(())
     }
 }
-struct Watcher {
+struct WatcherScope {
     watcher: BluetoothLEAdvertisementWatcher,
     received: Option<i64>,
     stopped: Option<i64>,
 }
-impl Watcher {
+impl WatcherScope {
     fn new() -> Result<Self, BleError> {
         let scope = Self {
             watcher: BluetoothLEAdvertisementWatcher::new().map_err(ble)?,
@@ -187,7 +198,7 @@ impl Watcher {
         Ok(scope)
     }
 }
-impl Drop for Watcher {
+impl Drop for WatcherScope {
     fn drop(&mut self) {
         if let Some(token) = self.received.take() {
             let _ = self.watcher.RemoveReceived(token);
@@ -201,14 +212,14 @@ impl Drop for Watcher {
 impl Bluetooth for WindowsBluetooth {
     type Link = WindowsGattLink;
     async fn scan(&self, target: Option<Address>) -> Result<Discovered, BleError> {
-        let mut scope = Watcher::new()?;
+        let mut scope = WatcherScope::new()?;
         let (tx, mut rx) = mpsc::channel(1);
         let stopped_tx = tx.clone();
         scope.received = Some(
             scope
                 .watcher
                 .Received(&TypedEventHandler::new(
-                    move |_, args: Ref<BluetoothLEAdvertisementReceivedEventArgs>| {
+                    move |_, args: Ref<'_, BluetoothLEAdvertisementReceivedEventArgs>| {
                         let Some(args) = args.as_ref() else {
                             return Ok(());
                         };
@@ -244,7 +255,7 @@ impl Bluetooth for WindowsBluetooth {
         );
         scope.stopped = Some(
             scope.watcher.Stopped(&TypedEventHandler::new(
-                move |_, args: Ref<BluetoothLEAdvertisementWatcherStoppedEventArgs>| {
+                move |_, args: Ref<'_, BluetoothLEAdvertisementWatcherStoppedEventArgs>| {
                     let reason = args.as_ref().and_then(|a| a.Error().ok());
                     let _ = stopped_tx.try_send(Err(BleError::Platform(format!(
                         "Bluetooth scan stopped: {reason:?}; check adapter power and Bluetooth permissions"
@@ -293,7 +304,7 @@ impl Bluetooth for WindowsBluetooth {
             resources
                 .device
                 .ConnectionStatusChanged(&TypedEventHandler::new(
-                    move |sender: Ref<BluetoothLEDevice>, _| {
+                    move |sender: Ref<'_, BluetoothLEDevice>, _| {
                         if sender.as_ref().is_none_or(|device| {
                             device.ConnectionStatus().ok()
                                 == Some(BluetoothConnectionStatus::Disconnected)
@@ -305,96 +316,109 @@ impl Bluetooth for WindowsBluetooth {
                 ))
                 .map_err(ble)?,
         );
-        let discovered = tokio::time::timeout(CONNECT_TIMEOUT, async {
-            let services = winrt!(
-                resources
-                    .device
-                    .GetGattServicesWithCacheModeAsync(BluetoothCacheMode::Uncached),
-                ble
-            )?;
-            check_status(services.Status().map_err(ble)?, "service discovery")
-                .map_err(|e| BleError::Platform(e.to_string()))?;
-            // Retain all service handles before any await so cancellation closes them.
-            resources.services = services.Services().map_err(ble)?.into_iter().collect();
-            let mut characteristics = HashMap::new();
-            for service in &resources.services {
-                let found = winrt!(
-                    service.GetCharacteristicsWithCacheModeAsync(BluetoothCacheMode::Uncached),
-                    ble
-                )?;
-                check_status(found.Status().map_err(ble)?, "characteristic discovery")
-                    .map_err(|e| BleError::Platform(e.to_string()))?;
-                for characteristic in found.Characteristics().map_err(ble)? {
-                    let uuid = characteristic.Uuid().map_err(ble)?;
-                    if let Some(kind) =
-                        Characteristic::from_uuid(uuid::Uuid::from_u128(uuid.to_u128()))
-                    {
-                        characteristics.insert(kind, characteristic);
-                    }
-                }
-            }
-            for kind in Characteristic::ALL {
-                if !characteristics.contains_key(&kind) {
-                    return Err(BleError::Platform(format!(
-                        "Required GATT characteristic missing: {kind:?}"
-                    )));
-                }
-            }
-            Ok(characteristics)
-        })
-        .await
-        .map_err(|_| BleError::Timeout)??;
+        let discovered = tokio::time::timeout(CONNECT_TIMEOUT, discover(&mut resources))
+            .await
+            .map_err(|_| BleError::Timeout)??;
         if closed.is_cancelled() {
             return Err(BleError::Platform(
                 "BLE disconnected during discovery".into(),
             ));
         }
-        let mut report = ConnectionReport {
+        let report = ConnectionReport {
             target: ConnectionTarget::ThroughputOptimized,
-            preference: PreferenceOutcome::Unavailable,
-            observed_interval: None,
+            preference: request_throughput_preference(&mut resources),
+            observed_interval: observed_interval(&resources.device),
         };
-        match BluetoothLEPreferredConnectionParameters::ThroughputOptimized().and_then(
-            |parameters| {
-                resources
-                    .device
-                    .RequestPreferredConnectionParameters(&parameters)
-            },
-        ) {
-            Ok(request) => {
-                tracing::info!(status = ?request.Status(), "Requested ThroughputOptimized BLE preference; no fixed interval guarantee");
-                report.preference = match request.Status() {
-                    Ok(PreferenceStatus::Success) => PreferenceOutcome::Confirmed,
-                    Ok(PreferenceStatus::DeviceNotAvailable) => PreferenceOutcome::Unavailable,
-                    Ok(PreferenceStatus::AccessDenied) => PreferenceOutcome::Refused,
-                    _ => PreferenceOutcome::Unconfirmed,
-                };
-                resources.preference = Some(request);
-            }
-            Err(error) => {
-                tracing::debug!(%error, "ThroughputOptimized preference unavailable; using system parameters");
-            }
-        }
-        match resources
-            .device
-            .GetConnectionParameters()
-            .and_then(|p| p.ConnectionInterval())
-        {
-            Ok(interval) => {
-                report.observed_interval = Some(interval);
-                tracing::info!(
-                    interval_units_1_25_ms = interval,
-                    "Observed BLE connection interval"
-                );
-            }
-            Err(error) => tracing::info!(%error, "Observed BLE connection interval: unknown"),
-        }
         resources.characteristics = discovered;
         Ok(WindowsGattLink {
             report,
             resources: RefCell::new(Some(resources)),
             closed,
         })
+    }
+}
+
+/// Discovers every required characteristic, retaining service handles in
+/// `resources` so cancellation closes them.
+async fn discover(
+    resources: &mut Resources,
+) -> Result<HashMap<Characteristic, GattCharacteristic>, BleError> {
+    let services = winrt!(
+        resources
+            .device
+            .GetGattServicesWithCacheModeAsync(BluetoothCacheMode::Uncached),
+        ble
+    )?;
+    check_status(services.Status().map_err(ble)?, "service discovery")
+        .map_err(|e| BleError::Platform(e.to_string()))?;
+    // Retain all service handles before any await so cancellation closes them.
+    resources.services = services.Services().map_err(ble)?.into_iter().collect();
+    let mut characteristics = HashMap::new();
+    for service in &resources.services {
+        let found = winrt!(
+            service.GetCharacteristicsWithCacheModeAsync(BluetoothCacheMode::Uncached),
+            ble
+        )?;
+        check_status(found.Status().map_err(ble)?, "characteristic discovery")
+            .map_err(|e| BleError::Platform(e.to_string()))?;
+        for characteristic in found.Characteristics().map_err(ble)? {
+            let uuid = characteristic.Uuid().map_err(ble)?;
+            if let Some(kind) = Characteristic::from_uuid(uuid::Uuid::from_u128(uuid.to_u128())) {
+                characteristics.insert(kind, characteristic);
+            }
+        }
+    }
+    for kind in Characteristic::ALL {
+        if !characteristics.contains_key(&kind) {
+            return Err(BleError::Platform(format!(
+                "Required GATT characteristic missing: {kind:?}"
+            )));
+        }
+    }
+    Ok(characteristics)
+}
+/// Best-effort request; Windows offers no fixed-interval guarantee.
+fn request_throughput_preference(resources: &mut Resources) -> PreferenceOutcome {
+    let request =
+        BluetoothLEPreferredConnectionParameters::ThroughputOptimized().and_then(|parameters| {
+            resources
+                .device
+                .RequestPreferredConnectionParameters(&parameters)
+        });
+    match request {
+        Ok(request) => {
+            tracing::info!(status = ?request.Status(), "Requested ThroughputOptimized BLE preference; no fixed interval guarantee");
+            let outcome = match request.Status() {
+                Ok(PreferenceStatus::Success) => PreferenceOutcome::Confirmed,
+                Ok(PreferenceStatus::DeviceNotAvailable) => PreferenceOutcome::Unavailable,
+                Ok(PreferenceStatus::AccessDenied) => PreferenceOutcome::Refused,
+                _ => PreferenceOutcome::Unconfirmed,
+            };
+            resources.preference = Some(request);
+            outcome
+        }
+        Err(error) => {
+            tracing::debug!(%error, "ThroughputOptimized preference unavailable; using system parameters");
+            PreferenceOutcome::Unavailable
+        }
+    }
+}
+fn observed_interval(device: &BluetoothLEDevice) -> Option<u16> {
+    match device
+        .GetConnectionParameters()
+        .and_then(|p| p.ConnectionInterval())
+    {
+        Ok(interval) => {
+            tracing::info!(
+                interval_units_1_25_ms = interval,
+                "Observed BLE connection interval"
+            );
+            Some(interval)
+        }
+        Err(error) => {
+            tracing::info!(%error, "Observed BLE connection interval: unknown");
+            None
+        }
     }
 }
 
@@ -499,7 +523,7 @@ impl GattLink for WindowsGattLink {
         let closed = self.closed.clone();
         let token = characteristic
             .ValueChanged(&TypedEventHandler::new(
-                move |_, args: Ref<GattValueChangedEventArgs>| {
+                move |_, args: Ref<'_, GattValueChangedEventArgs>| {
                     if closed.is_cancelled() {
                         return Ok(());
                     }
@@ -572,7 +596,10 @@ mod tests {
         let buffer = Buffer::Create(64).unwrap();
         buffer.SetLength(3).unwrap();
         let access: IBufferByteAccess = buffer.cast().unwrap();
+        // SAFETY: Buffer has no preconditions; it returns the live buffer's storage.
         let pointer = unsafe { access.Buffer().unwrap() };
+        // SAFETY: the buffer has 64 bytes of capacity, so 3 bytes are writable, and the
+        // source array does not overlap it.
         unsafe { std::ptr::copy_nonoverlapping([1u8, 2, 3].as_ptr(), pointer, 3) };
         with_buffer(&buffer.cast().unwrap(), |bytes| {
             assert_eq!(bytes, &[1, 2, 3]);
@@ -580,19 +607,19 @@ mod tests {
         })
         .unwrap();
         buffer.SetLength(0).unwrap();
-        with_buffer(&buffer.cast().unwrap(), |bytes| assert!(bytes.is_empty())).unwrap();
+        with_buffer(&buffer.cast().unwrap(), |bytes| assert_eq!(bytes, [0u8; 0])).unwrap();
     }
 
     #[test]
     fn cancellation_scope_runs_when_operation_future_is_dropped() {
         let cancelled = Arc::new(AtomicBool::new(false));
         let flag = cancelled.clone();
-        let _scope = {
+        let scope = {
             let guard = OnDrop(Some(move || flag.store(true, Ordering::SeqCst)));
             assert!(!cancelled.load(Ordering::SeqCst));
             guard
         };
-        drop(_scope);
+        drop(scope);
         assert!(cancelled.load(Ordering::SeqCst));
     }
 
