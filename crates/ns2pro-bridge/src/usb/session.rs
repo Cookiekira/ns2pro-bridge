@@ -27,6 +27,10 @@ async fn read_urb<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<(Urb, Vec<
 /// # Errors
 ///
 /// When reading or writing the USB/IP stream fails or a header is invalid.
+///
+/// # Panics
+///
+/// Only if the internal URB frame stream ends, which it never does.
 pub async fn serve_urbs<S: AsyncRead + AsyncWrite + Unpin>(
     stream: S,
     channels: Channels,
@@ -78,11 +82,8 @@ pub async fn serve_urbs<S: AsyncRead + AsyncWrite + Unpin>(
                 engine.on_sample(*input.borrow_and_update(), now(), &mut effects);
             }
             frame = frames.next() => {
-                // `unfold` never yields None: read errors are returned as items.
-                let Some(frame) = frame else {
-                    return Ok(());
-                };
-                let (u, data) = frame?;
+                #[expect(clippy::expect_used, reason = "`unfold` yields read errors as items and never ends")]
+                let (u, data) = frame.expect("URB stream is infinite")?;
                 engine.submit(u, &data, now(), &mut effects);
             }
             () = timer => engine.on_keepalive_due(now(), &mut effects),

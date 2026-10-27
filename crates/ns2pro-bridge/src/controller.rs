@@ -89,9 +89,11 @@ impl<'a, L: GattLink> Controller<'a, L> {
         // Exclusive ownership serializes commands without a runtime lock.
         let responses = &mut self.responses;
         while responses.try_recv().is_ok() {}
-        let &[cmd, _, _, sub, ..] = request else {
-            return Err(LinkError::Platform("malformed controller command".into()).into());
-        };
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "requests come from command::command, which writes an 8-byte header"
+        )]
+        let (cmd, sub) = (request[0], request[3]);
         let closed = self.link.closed();
         let transaction = async {
             self.link.write(Characteristic::Command, request).await?;

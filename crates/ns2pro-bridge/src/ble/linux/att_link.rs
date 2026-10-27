@@ -202,8 +202,12 @@ async fn read_loop(shared: &Shared) {
                 Ok(n) => n,
             },
         };
-        let received = buffer.get(..count).ok_or(att::AttError::Malformed);
-        let packet = match received.and_then(att::classify) {
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "Socket::recv rejects packets longer than the buffer"
+        )]
+        let received = &buffer[..count];
+        let packet = match att::classify(received) {
             Ok(p) => p,
             Err(e) => {
                 tracing::debug!(%e,"malformed ATT packet");

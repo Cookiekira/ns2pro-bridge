@@ -76,9 +76,9 @@ impl Statistics {
             && let Some((s, t)) = self.arrival
             && s == seq
         {
-            if let Some(slot) = self.latencies.get_mut(self.cursor) {
-                *slot = u64::try_from(t.elapsed().as_nanos()).unwrap_or(u64::MAX);
-            }
+            #[expect(clippy::indexing_slicing, reason = "cursor stays below SAMPLES")]
+            let slot = &mut self.latencies[self.cursor];
+            *slot = u64::try_from(t.elapsed().as_nanos()).unwrap_or(u64::MAX);
             self.cursor = (self.cursor + 1) % SAMPLES;
             self.len = (self.len + 1).min(SAMPLES);
             self.arrival = None;
@@ -87,17 +87,12 @@ impl Statistics {
     #[expect(
         clippy::cast_precision_loss,
         clippy::as_conversions,
-        reason = "rates are approximate diagnostics; counts never approach 2^53"
+        clippy::indexing_slicing,
+        reason = "rates are approximate diagnostics (counts never approach 2^53); len <= SAMPLES"
     )]
     pub fn log(&mut self) {
-        // len never exceeds SAMPLES, the length of both buffers.
-        let (Some(values), Some(latencies)) = (
-            self.sorted.get_mut(..self.len),
-            self.latencies.get(..self.len),
-        ) else {
-            return;
-        };
-        values.copy_from_slice(latencies);
+        let values = &mut self.sorted[..self.len];
+        values.copy_from_slice(&self.latencies[..self.len]);
         values.sort_unstable();
         let values = &*values;
         let p = |percent: usize| {
