@@ -39,6 +39,11 @@ async fn client(
         }
     }
 }
+/// Accepts USB/IP clients until cancelled; each import is served on its own task.
+///
+/// # Errors
+///
+/// When accepting a connection fails.
 pub async fn serve(
     listener: &TcpListener,
     channels: Channels,
