@@ -412,6 +412,23 @@ pub fn classify(p: &[u8]) -> Result<Packet<'_>, AttError> {
 mod tests {
     use super::*;
     #[test]
+    fn write_command_needs_room_and_leaves_short_buffers_untouched() {
+        let mut exact = [0xEE; 6];
+        assert_eq!(
+            write_command(&mut exact, 0x1234, &[1, 2, 3]),
+            Some(&[0x52, 0x34, 0x12, 1, 2, 3][..])
+        );
+        let mut roomy = [0xEE; 8];
+        assert_eq!(
+            write_command(&mut roomy, 0x1234, &[1, 2, 3]).map(<[u8]>::len),
+            Some(6)
+        );
+        assert_eq!(roomy[6..], [0xEE, 0xEE]);
+        let mut short = [0xEE; 5];
+        assert_eq!(write_command(&mut short, 0x1234, &[1, 2, 3]), None);
+        assert_eq!(short, [0xEE; 5]);
+    }
+    #[test]
     fn asynchronous_packets_borrow_and_validate() {
         assert_eq!(
             classify(&[0x1d, 0x34, 0x12, 7]).unwrap(),

@@ -437,7 +437,7 @@ async fn discovery_pairing_cache_host_override_and_pair_once_per_process() {
         "11:22:33:44:55:66",
         "--pair-host",
     ]);
-    options.cache_file = cache.path();
+    options.cache_file = Some(cache.path());
     let report = ConnectionReport {
         target: ConnectionTarget::Interval(6),
         preference: PreferenceOutcome::Confirmed,
@@ -509,7 +509,7 @@ async fn forget_device_and_bounded_cancellable_backoff() {
         .save(Address::new(1).unwrap())
         .unwrap();
     let mut options = Options::parse_from(["bridge", "--forget-device"]);
-    options.cache_file = cache.path();
+    options.cache_file = Some(cache.path());
     let bluetooth = FakeController::new(FakeOptions {
         fail_scan: true,
         ..Default::default()

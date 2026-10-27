@@ -267,7 +267,7 @@ impl Drop for TestCache {
 }
 pub(crate) fn options(cache: &TestCache) -> Options {
     let mut o = Options::parse_from(["bridge", "--no-auto-attach"]);
-    o.cache_file = cache.path();
+    o.cache_file = Some(cache.path());
     o
 }
 pub(crate) async fn until(mut condition: impl FnMut() -> bool) {

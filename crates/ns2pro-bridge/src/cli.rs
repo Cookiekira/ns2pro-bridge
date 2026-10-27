@@ -23,9 +23,10 @@ pub struct Options {
     /// Remove the cached selection before reconnect supervision
     #[arg(long)]
     pub forget_device: bool,
-    /// Controller cache file
-    #[arg(long,default_value_os_t=default_cache())]
-    pub cache_file: PathBuf,
+    /// Controller cache file [default: /var/lib/ns2pro-bridge/controller-cache.json on
+    /// Linux, ns2pro-bridge\controller-cache.json under the local app data folder on Windows]
+    #[arg(long)]
+    pub cache_file: Option<PathBuf>,
     /// Serve TCP USB/IP for manual/remote clients without attaching
     #[arg(long)]
     pub no_auto_attach: bool,
@@ -38,19 +39,33 @@ pub struct Options {
     #[arg(long, hide = true)]
     pub bt_smoke_test: bool,
 }
-#[cfg(target_os = "linux")]
-fn default_cache() -> PathBuf {
-    PathBuf::from("/var/lib/ns2pro-bridge/controller-cache.json")
-}
-#[cfg(windows)]
-#[expect(
-    clippy::expect_used,
-    reason = "a clap default cannot fail gracefully; Windows always defines LOCALAPPDATA"
-)]
-fn default_cache() -> PathBuf {
-    dirs::data_local_dir()
-        .expect("local data directory unavailable")
-        .join("ns2pro-bridge/controller-cache.json")
+impl Options {
+    /// The explicit `--cache-file`, or the platform default.
+    ///
+    /// # Errors
+    ///
+    /// On Windows, when the local application data folder cannot be resolved.
+    pub fn cache_file(&self) -> std::io::Result<PathBuf> {
+        if let Some(path) = &self.cache_file {
+            return Ok(path.clone());
+        }
+        #[cfg(target_os = "linux")]
+        {
+            Ok(PathBuf::from(
+                "/var/lib/ns2pro-bridge/controller-cache.json",
+            ))
+        }
+        #[cfg(windows)]
+        {
+            dirs::data_local_dir()
+                .map(|dir| dir.join("ns2pro-bridge/controller-cache.json"))
+                .ok_or_else(|| {
+                    std::io::Error::other(
+                        "cannot resolve the local app data folder; pass --cache-file",
+                    )
+                })
+        }
+    }
 }
 fn parse_flags(s: &str) -> Result<u8, String> {
     s.strip_prefix("0x")
@@ -89,19 +104,22 @@ mod tests {
         let defaults = Options::try_parse_from(["bridge"]).unwrap();
         #[cfg(target_os = "linux")]
         assert_eq!(
-            defaults.cache_file,
+            defaults.cache_file().unwrap(),
             PathBuf::from("/var/lib/ns2pro-bridge/controller-cache.json")
         );
         #[cfg(windows)]
         assert_eq!(
-            defaults.cache_file,
+            defaults.cache_file().unwrap(),
             dirs::data_local_dir()
                 .unwrap()
                 .join("ns2pro-bridge/controller-cache.json")
         );
         let options =
             Options::try_parse_from(["bridge", "--cache-file", "/tmp/controller.json"]).unwrap();
-        assert_eq!(options.cache_file, PathBuf::from("/tmp/controller.json"));
+        assert_eq!(
+            options.cache_file().unwrap(),
+            PathBuf::from("/tmp/controller.json")
+        );
     }
     #[test]
     fn defaults_and_flags() {
