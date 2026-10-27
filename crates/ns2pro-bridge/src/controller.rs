@@ -33,20 +33,20 @@ pub(crate) struct Connection<'a, L: GattLink> {
     channels: &'a Channels,
 }
 impl<'a, L: GattLink> Connection<'a, L> {
-    pub fn new(link: L, channels: &'a Channels) -> Self {
+    pub(crate) fn new(link: L, channels: &'a Channels) -> Self {
         channels.rumble.send_replace(None);
         Self { link, channels }
     }
-    pub async fn initialize(&self, flags: u8) -> Result<Controller<'_, L>, ControllerError> {
+    pub(crate) async fn initialize(&self, flags: u8) -> Result<Controller<'_, L>, ControllerError> {
         let mut controller = Controller::new(&self.link).await?;
         controller.initialize(self.channels, flags).await?;
         Ok(controller)
     }
-    pub fn established(&self) {
+    pub(crate) fn established(&self) {
         let report = self.link.connection_report();
         self.channels.stats.lock().unwrap().connected(report);
     }
-    pub async fn disconnect(self) {
+    pub(crate) async fn disconnect(self) {
         self.channels.stats.lock().unwrap().disconnected();
         // Revoke callbacks before taking the watch lock for the final neutral sample.
         // Input callbacks check this same token under that lock.
@@ -92,7 +92,7 @@ impl<'a, L: GattLink> Controller<'a, L> {
             Ok(response)
         };
         tokio::select! {
-            _ = closed.cancelled() => Err(LinkError::Closed.into()),
+            () = closed.cancelled() => Err(LinkError::Closed.into()),
             result = tokio::time::timeout(Duration::from_secs(2), transaction) => {
                 result.map_err(|_| ControllerError::Link(LinkError::Timeout))?
             }
@@ -223,8 +223,8 @@ impl<'a, L: GattLink> Controller<'a, L> {
             }
         };
         let result: Result<Infallible, ControllerError> = tokio::select! {
-            _ = cancel.cancelled() => Err(ControllerError::Cancelled),
-            _ = closed.cancelled() => Err(LinkError::Closed.into()),
+            () = cancel.cancelled() => Err(ControllerError::Cancelled),
+            () = closed.cancelled() => Err(LinkError::Closed.into()),
             result = rumble_task => result,
             result = led_task => result,
         };

@@ -53,7 +53,7 @@ impl UrbEngine {
             (_, 0) => match self.device.control(u.setup, data, &self.sample) {
                 Ok((p, o)) => {
                     payload = p;
-                    output = o
+                    output = o;
                 }
                 Err(s) => status = s,
             },
@@ -68,7 +68,7 @@ impl UrbEngine {
             }
             (1, 2) => {
                 if let Some(p) = self.device.read_bulk_in(u.length) {
-                    payload = p
+                    payload = p;
                 } else {
                     if self.pending.len() >= 256 {
                         reply_into(&mut e.replies, u, -12, &[], 0);
@@ -98,7 +98,7 @@ impl UrbEngine {
             actual,
         );
         if let Some(o) = output {
-            e.outputs.push(o)
+            e.outputs.push(o);
         }
         self.drain(now, false, e);
     }
@@ -120,6 +120,7 @@ impl UrbEngine {
         self.dirty = true;
         self.drain(now, false, e);
     }
+    #[must_use]
     pub fn next_keepalive_at(&self) -> Option<u64> {
         self.pending
             .iter()

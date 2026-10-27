@@ -1,5 +1,5 @@
 //! Repeatable host-side latency/allocation experiment, never a wireless benchmark.
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[path = "support/fake.rs"]
 mod fake;
 use fake::*;
@@ -24,7 +24,7 @@ struct CountingAllocator;
 fn allocated(bytes: usize) {
     let _ = ALLOCATIONS.try_with(|c| {
         if let Some((n, b)) = c.get() {
-            c.set(Some((n + 1, b + bytes as u64)))
+            c.set(Some((n + 1, b + bytes as u64)));
         }
     });
 }
@@ -50,7 +50,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
 #[global_allocator]
 static ALLOCATOR: CountingAllocator = CountingAllocator;
 fn start_count() {
-    ALLOCATIONS.with(|c| c.set(Some((0, 0))))
+    ALLOCATIONS.with(|c| c.set(Some((0, 0))));
 }
 fn stop_count() -> (u64, u64) {
     ALLOCATIONS.with(|c| c.replace(None).unwrap())
@@ -140,7 +140,7 @@ async fn notification_to_in_memory_response() {
         tokio::pin!(attempt);
         tokio::select! {
             result = &mut attempt => panic!("setup failed: {result:?}"),
-            _ = until(|| radio.ready()) => {}
+            () = until(|| radio.ready()) => {}
         }
         report(&mut peer, 0).await; // Consume initial dirty default state.
         let mut timings = Vec::with_capacity(SAMPLES);

@@ -80,7 +80,7 @@ fn all_scenario_fixtures() {
                 }
                 "in" => Some(if step["ep"] == 1 {
                     if imu {
-                        timestamp += 4000
+                        timestamp += 4000;
                     }
                     sample.motion_timestamp_us = timestamp;
                     d.interrupt_in(&sample).to_vec()
@@ -122,7 +122,7 @@ fn all_scenario_fixtures() {
                 let expected = &expected[0];
                 match output.unwrap() {
                     Output::PlayerLeds(v) => {
-                        assert_eq!(u64::from(v), expected["leds"].as_u64().unwrap())
+                        assert_eq!(u64::from(v), expected["leds"].as_u64().unwrap());
                     }
                     Output::Rumble { left, right } => {
                         assert_eq!(left.as_slice(), hex(&expected["left"]));
@@ -130,7 +130,7 @@ fn all_scenario_fixtures() {
                     }
                 }
             } else {
-                assert!(output.is_none(), "unexpected output {step}")
+                assert!(output.is_none(), "unexpected output {step}");
             }
         }
     }

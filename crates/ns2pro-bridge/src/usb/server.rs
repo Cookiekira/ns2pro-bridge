@@ -17,14 +17,14 @@ async fn client(
     loop {
         let mut header = [0; 8];
         tokio::select! {
-            _ = cancel.cancelled() => return Ok(()),
+            () = cancel.cancelled() => return Ok(()),
             result = stream.read_exact(&mut header) => { result?; }
         }
         let request = ManagementRequest::parse(&header);
         if request.is_import() {
             let mut busid = [0; 32];
             tokio::select! {
-                _ = cancel.cancelled() => return Ok(()),
+                () = cancel.cancelled() => return Ok(()),
                 result = stream.read_exact(&mut busid) => { result?; }
             }
             stream.write_all(&request.reply(Some(&busid))).await?;
@@ -47,7 +47,7 @@ pub async fn serve(
     let mut clients = JoinSet::new();
     loop {
         tokio::select! {
-            _ = cancel.cancelled() => {
+            () = cancel.cancelled() => {
                 clients.abort_all();
                 while clients.join_next().await.is_some() {}
                 return Ok(());

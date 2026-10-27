@@ -124,7 +124,7 @@ impl Management {
         };
         let result = tokio::select! {
             biased;
-            _ = cancel.cancelled() => Err(BleError::Cancelled),
+            () = cancel.cancelled() => Err(BleError::Cancelled),
             result = timeout(duration, async {
                 loop {
                     let p = if let Some(p) = m.events.pop_front() {

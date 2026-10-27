@@ -38,16 +38,17 @@ impl Default for Statistics {
     }
 }
 impl Statistics {
-    pub fn connected(&mut self, report: crate::ble::ConnectionReport) {
+    pub const fn connected(&mut self, report: crate::ble::ConnectionReport) {
         self.connection = report;
     }
     pub fn disconnected(&mut self) {
         self.connection = Default::default();
     }
-    pub fn connection_report(&self) -> crate::ble::ConnectionReport {
+    #[must_use]
+    pub const fn connection_report(&self) -> crate::ble::ConnectionReport {
         self.connection
     }
-    pub fn rumble_written(&mut self) {
+    pub const fn rumble_written(&mut self) {
         self.rumble_writes += 1;
     }
     pub fn receipt(&mut self, seq: u64) {
@@ -95,7 +96,7 @@ impl Statistics {
             },
             interarrival_max_us = self.interval_max,
             interarrival_mean_us = if self.reports > 1 {
-                self.interval_sum / (self.reports - 1) as u128
+                self.interval_sum / u128::from(self.reports - 1)
             } else {
                 0
             },
@@ -108,9 +109,7 @@ impl Statistics {
             preference_result = ?self.connection.preference,
             observed_interval_ms = %self
                 .connection
-                .observed_interval
-                .map(|units| (f64::from(units) * 1.25).to_string())
-                .unwrap_or_else(|| "unknown".into()),
+                .observed_interval.map_or_else(|| "unknown".into(), |units| (f64::from(units) * 1.25).to_string()),
             "bridge statistics (receipt to completed socket write; excludes BLE and host)"
         );
     }
@@ -122,7 +121,7 @@ pub async fn diagnostics(
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     loop {
         tokio::select! {
-            _ = cancel.cancelled() => return,
+            () = cancel.cancelled() => return,
             _ = tick.tick() => channels.stats.lock().unwrap().log(),
         }
     }

@@ -15,19 +15,23 @@ pub fn write_command<'a>(buffer: &'a mut [u8], handle: u16, value: &[u8]) -> &'a
     buffer[3..3 + value.len()].copy_from_slice(value);
     &buffer[..3 + value.len()]
 }
-pub fn cccd_write_request(handle: u16) -> [u8; 5] {
+#[must_use]
+pub const fn cccd_write_request(handle: u16) -> [u8; 5] {
     let [a, b] = handle.to_le_bytes();
     [0x12, a, b, 1, 0]
 }
-pub fn mtu_request() -> [u8; 3] {
+#[must_use]
+pub const fn mtu_request() -> [u8; 3] {
     let [a, b] = MTU.to_le_bytes();
     [0x02, a, b]
 }
-pub fn mtu_response() -> [u8; 3] {
+#[must_use]
+pub const fn mtu_response() -> [u8; 3] {
     let [a, b] = MTU.to_le_bytes();
     [0x03, a, b]
 }
-pub fn error_response(request: u8, handle: u16, code: u8) -> [u8; 5] {
+#[must_use]
+pub const fn error_response(request: u8, handle: u16, code: u8) -> [u8; 5] {
     let [a, b] = handle.to_le_bytes();
     [ERROR_RESPONSE, request, a, b, code]
 }
@@ -93,7 +97,8 @@ fn range(op: u8, start: u16, end: u16, uuid: Option<u16>) -> Vec<u8> {
     p
 }
 impl Discovery {
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self {
             stage: Stage::Mtu,
             services: vec![],
@@ -101,9 +106,11 @@ impl Discovery {
             mtu: DEFAULT_MTU,
         }
     }
-    pub fn mtu(&self) -> u16 {
+    #[must_use]
+    pub const fn mtu(&self) -> u16 {
         self.mtu
     }
+    #[must_use]
     pub fn request(&self) -> Option<Vec<u8>> {
         match self.stage {
             Stage::Mtu => Some(mtu_request().to_vec()),

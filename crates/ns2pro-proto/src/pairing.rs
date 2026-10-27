@@ -27,7 +27,11 @@ pub struct Pairing {
     stage: u8,
 }
 impl Pairing {
-    pub fn new(host: Address, key: [u8; 16], challenge: [u8; 16]) -> Result<Self, PairingError> {
+    pub const fn new(
+        host: Address,
+        key: [u8; 16],
+        challenge: [u8; 16],
+    ) -> Result<Self, PairingError> {
         if host.value() == 0 {
             return Err(PairingError::ZeroAddress);
         }
@@ -39,6 +43,7 @@ impl Pairing {
             stage: 0,
         })
     }
+    #[must_use]
     pub fn next_command(&self) -> Option<Vec<u8>> {
         let (sub, payload) = match self.stage {
             0 => {
@@ -79,6 +84,7 @@ impl Pairing {
         Ok(())
     }
 }
+#[must_use]
 pub fn confirmation(mut ltk: [u8; 16], mut challenge: [u8; 16]) -> [u8; 16] {
     ltk.reverse();
     challenge.reverse();

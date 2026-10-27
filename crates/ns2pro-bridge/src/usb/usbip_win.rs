@@ -86,7 +86,7 @@ fn open_driver() -> Result<OwnedHandle, AttachError> {
         ..Default::default()
     };
     if let Err(error) =
-        unsafe { SetupDiEnumDeviceInterfaces(devices.0, None, &DEVICE_GUID, 0, &mut interface) }
+        unsafe { SetupDiEnumDeviceInterfaces(devices.0, None, &DEVICE_GUID, 0, &raw mut interface) }
     {
         if error.code() == ERROR_NO_MORE_ITEMS.to_hresult() {
             return Err(platform("usbip-win2 device interface not found"));
@@ -95,7 +95,14 @@ fn open_driver() -> Result<OwnedHandle, AttachError> {
     }
     let mut required = 0;
     let probe = unsafe {
-        SetupDiGetDeviceInterfaceDetailW(devices.0, &interface, None, 0, Some(&mut required), None)
+        SetupDiGetDeviceInterfaceDetailW(
+            devices.0,
+            &raw const interface,
+            None,
+            0,
+            Some(&raw mut required),
+            None,
+        )
     };
     if let Err(error) = probe
         && error.code() != ERROR_INSUFFICIENT_BUFFER.to_hresult()
@@ -112,8 +119,15 @@ fn open_driver() -> Result<OwnedHandle, AttachError> {
         .cast::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>();
     unsafe {
         (*detail).cbSize = size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>() as u32;
-        SetupDiGetDeviceInterfaceDetailW(devices.0, &interface, Some(detail), required, None, None)
-            .map_err(platform)?;
+        SetupDiGetDeviceInterfaceDetailW(
+            devices.0,
+            &raw const interface,
+            Some(detail),
+            required,
+            None,
+            None,
+        )
+        .map_err(platform)?;
         // Validate termination within the allocated device path before CreateFileW.
         let path = std::slice::from_raw_parts(
             std::ptr::addr_of!((*detail).DevicePath).cast::<u16>(),
@@ -137,7 +151,7 @@ fn open_driver() -> Result<OwnedHandle, AttachError> {
 }
 
 /// Keep buffers, event and OVERLAPPED alive until Windows acknowledges completion,
-/// even on cancellation. CancelIoEx requests cancellation; it does not complete it.
+/// even on cancellation. `CancelIoEx` requests cancellation; it does not complete it.
 fn ioctl(
     handle: &OwnedHandle,
     code: u32,
@@ -167,8 +181,8 @@ fn ioctl(
                 Some(buffer.as_mut_ptr().cast())
             },
             output_len,
-            Some(&mut transferred),
-            Some(&mut overlapped),
+            Some(&raw mut transferred),
+            Some(&raw mut overlapped),
         )
     };
     match result {
@@ -183,10 +197,16 @@ fn ioctl(
             break;
         }
         if cancel.is_cancelled() || wait != WAIT_TIMEOUT {
-            let _ = unsafe { CancelIoEx(raw(handle), Some(&overlapped)) };
+            let _ = unsafe { CancelIoEx(raw(handle), Some(&raw const overlapped)) };
             // Drain before freeing OVERLAPPED or the METHOD_BUFFERED request.
-            let result =
-                unsafe { GetOverlappedResult(raw(handle), &overlapped, &mut transferred, true) };
+            let result = unsafe {
+                GetOverlappedResult(
+                    raw(handle),
+                    &raw const overlapped,
+                    &raw mut transferred,
+                    true,
+                )
+            };
             // Completion may have won the cancellation race. Return it so the
             // worker can detach an import that actually succeeded.
             if result.is_ok() {
@@ -198,8 +218,15 @@ fn ioctl(
             return Err(ioctl_error(result.unwrap_err()));
         }
     }
-    unsafe { GetOverlappedResult(raw(handle), &overlapped, &mut transferred, false) }
-        .map_err(ioctl_error)?;
+    unsafe {
+        GetOverlappedResult(
+            raw(handle),
+            &raw const overlapped,
+            &raw mut transferred,
+            false,
+        )
+    }
+    .map_err(ioctl_error)?;
     Ok(transferred)
 }
 fn detach_port(handle: &OwnedHandle, port: i32) -> Result<(), AttachError> {

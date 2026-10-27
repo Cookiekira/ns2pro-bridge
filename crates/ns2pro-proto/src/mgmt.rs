@@ -36,7 +36,8 @@ impl AddressType {
                 .ok_or(Malformed)
         }
     }
-    pub fn code(self) -> u8 {
+    #[must_use]
+    pub const fn code(self) -> u8 {
         match self {
             Self::BrEdr => 0,
             Self::Le(kind) => kind.to_mgmt(),
@@ -62,6 +63,7 @@ impl Device {
             address_type,
         })
     }
+    #[must_use]
     pub fn encode(self) -> [u8; 7] {
         let mut p = [0; 7];
         p[..6].copy_from_slice(&self.address.to_le_bytes());
@@ -143,10 +145,12 @@ pub struct AdapterInfo {
     pub current: u32,
 }
 impl AdapterInfo {
-    pub fn supports_le(&self) -> bool {
+    #[must_use]
+    pub const fn supports_le(&self) -> bool {
         self.supported & (1 << 9) != 0
     }
-    pub fn powered(&self) -> bool {
+    #[must_use]
+    pub const fn powered(&self) -> bool {
         self.current & 1 != 0
     }
 }
@@ -192,7 +196,7 @@ pub fn controller_advertisement(mut eir: &[u8]) -> Result<Option<AdvertisementMo
         }
         if eir[1] == 0xff && n >= 3 {
             result = result.or_else(|| {
-                advertisement::parse(u16::from_le_bytes([eir[2], eir[3]]), &eir[4..n + 1])
+                advertisement::parse(u16::from_le_bytes([eir[2], eir[3]]), &eir[4..=n])
             });
         }
         eir = &eir[n + 1..];
@@ -215,7 +219,7 @@ mod tests {
             }
         );
         for n in 0..p.len() {
-            assert!(Frame::decode(&p[..n]).is_err())
+            assert!(Frame::decode(&p[..n]).is_err());
         }
         assert!(Frame::decode(&[1, 0, 0, 0, 0, 0, 1]).is_err());
     }
@@ -247,7 +251,7 @@ mod tests {
             Some(AdvertisementMode::Wake)
         );
         for n in 1..ad.len() {
-            assert!(controller_advertisement(&ad[..n]).is_err())
+            assert!(controller_advertisement(&ad[..n]).is_err());
         }
         let mut p = vec![0; 14];
         p[6] = 2;

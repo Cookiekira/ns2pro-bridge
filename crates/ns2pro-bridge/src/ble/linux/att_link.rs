@@ -38,7 +38,7 @@ impl Shared {
         // cannot interleave bytes; only request/reply transactions need a lock.
         tokio::select! {
             biased;
-            _ = self.closed.cancelled() => Err(LinkError::Closed),
+            () = self.closed.cancelled() => Err(LinkError::Closed),
             result = self.socket.send(p) => result.map_err(Into::into),
         }
     }
@@ -65,7 +65,7 @@ impl Shared {
         self.send(p).await?;
         let result = tokio::select! {
             biased;
-            _ = self.closed.cancelled() => return Err(LinkError::Closed),
+            () = self.closed.cancelled() => return Err(LinkError::Closed),
             result = timeout(Duration::from_secs(2), rx) => {
                 result.map_err(|_| LinkError::Timeout)?.map_err(|_| LinkError::Closed)?
             }
@@ -195,7 +195,7 @@ async fn read_loop(shared: &Shared) {
     loop {
         let count = tokio::select! {
             biased;
-            _ = shared.closed.cancelled() => return,
+            () = shared.closed.cancelled() => return,
             result = shared.socket.recv(&mut buffer) => match result {
                 Ok(0) | Err(_) => return,
                 Ok(n) => n,
@@ -297,8 +297,8 @@ mod tests {
                     socket.fd(),
                     libc::SOL_SOCKET,
                     libc::SO_SNDBUF,
-                    (&buffer as *const libc::c_int).cast(),
-                    std::mem::size_of_val(&buffer) as _,
+                    (&raw const buffer).cast(),
+                    size_of_val(&buffer) as _,
                 )
             },
             0
@@ -374,7 +374,7 @@ mod tests {
         let s = shared.clone();
         let reader = tokio::spawn(async move {
             read_loop(&s).await;
-            s.close()
+            s.close();
         });
         let mut p = [0; 32];
         b.send(&[2, 64, 0]).await.unwrap();

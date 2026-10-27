@@ -15,6 +15,7 @@ pub enum Abi {
 }
 impl Abi {
     pub const SUPPORTED: [Self; 3] = [Self::V0981, Self::V0978, Self::V0977];
+    #[must_use]
     pub const fn size(self) -> usize {
         match self {
             Self::V0981 => 1124,
@@ -84,8 +85,7 @@ pub fn plugin(address: SocketAddr, abi: Abi) -> Result<Vec<u8>, WireError> {
 pub fn attached_port(response: &[u8], bytes: u32) -> Result<i32, WireError> {
     let port = response
         .get(4..8)
-        .map(|b| i32::from_le_bytes(b.try_into().unwrap()))
-        .unwrap_or(0);
+        .map_or(0, |b| i32::from_le_bytes(b.try_into().unwrap()));
     if bytes != PORT_END as u32 || port <= 0 {
         Err(WireError::InvalidResponse { bytes, port })
     } else {

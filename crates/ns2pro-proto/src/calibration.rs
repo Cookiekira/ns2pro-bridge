@@ -29,6 +29,7 @@ pub struct StickCalibration {
 
 impl StickCalibration {
     /// Decodes nine bytes: center, positive span, negative span.
+    #[must_use]
     pub fn decode(raw: &[u8]) -> Option<Self> {
         let raw: &[u8; 9] = raw.get(..9)?.try_into().ok()?;
         let pair = |offset: usize| {
@@ -55,6 +56,7 @@ pub struct Calibration {
 
 impl Calibration {
     /// Combines factory blocks with an optional user block; user data wins when its magic is present.
+    #[must_use]
     pub fn from_blocks(
         primary_factory: &[u8],
         secondary_factory: &[u8],

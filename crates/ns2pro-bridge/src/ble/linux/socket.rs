@@ -22,7 +22,13 @@ const ATT_CID: u16 = 4;
 fn bind<T>(fd: RawFd, address: &T) -> io::Result<()> {
     // SAFETY: callers supply initialized Linux socket address structures, borrowed
     // for this syscall only; the descriptor is owned by the caller.
-    let result = unsafe { libc::bind(fd, (address as *const T).cast(), mem::size_of::<T>() as _) };
+    let result = unsafe {
+        libc::bind(
+            fd,
+            std::ptr::from_ref::<T>(address).cast(),
+            size_of::<T>() as _,
+        )
+    };
     if result < 0 {
         Err(io::Error::last_os_error())
     } else {
@@ -36,8 +42,8 @@ fn setsockopt<T>(fd: RawFd, level: i32, option: i32, value: &T) -> io::Result<()
             fd,
             level,
             option,
-            (value as *const T).cast(),
-            mem::size_of::<T>() as _,
+            std::ptr::from_ref::<T>(value).cast(),
+            size_of::<T>() as _,
         )
     };
     if result < 0 {
@@ -48,13 +54,13 @@ fn setsockopt<T>(fd: RawFd, level: i32, option: i32, value: &T) -> io::Result<()
 }
 fn getsockopt<T: Default>(fd: RawFd, level: i32, option: i32) -> io::Result<T> {
     let mut value = T::default();
-    let mut len = mem::size_of::<T>() as libc::socklen_t;
+    let mut len = size_of::<T>() as libc::socklen_t;
     // SAFETY: callers pair each option with writable native storage of its type.
     let result =
-        unsafe { libc::getsockopt(fd, level, option, (&mut value as *mut T).cast(), &mut len) };
+        unsafe { libc::getsockopt(fd, level, option, (&raw mut value).cast(), &raw mut len) };
     if result < 0 {
         Err(io::Error::last_os_error())
-    } else if len as usize != mem::size_of::<T>() {
+    } else if len as usize != size_of::<T>() {
         Err(io::Error::other("unexpected socket option size"))
     } else {
         Ok(value)
@@ -84,13 +90,13 @@ fn send(fd: RawFd, p: &[u8]) -> io::Result<usize> {
     }
 }
 fn check_write(n: usize, expected: usize) -> io::Result<()> {
-    if n != expected {
+    if n == expected {
+        Ok(())
+    } else {
         Err(io::Error::new(
             io::ErrorKind::WriteZero,
             "partial Bluetooth packet write",
         ))
-    } else {
-        Ok(())
     }
 }
 #[derive(Debug)]
@@ -122,7 +128,7 @@ struct HciFilter {
     opcode: u16,
 }
 impl Socket {
-    /// Observe only this adapter; never take over HCI_CHANNEL_USER or modify
+    /// Observe only this adapter; never take over `HCI_CHANNEL_USER` or modify
     /// controller-wide event masks.
     pub(super) fn hci(index: u16) -> io::Result<Self> {
         let fd = Self::create(libc::SOCK_RAW, BTPROTO_HCI)?;
@@ -155,27 +161,19 @@ impl Socket {
         ] {
             // SAFETY: sockaddr_l2 is plain integer storage, fully initialized.
             let mut address: L2capAddress = unsafe { mem::zeroed() };
-            let mut len = mem::size_of_val(&address) as libc::socklen_t;
+            let mut len = size_of_val(&address) as libc::socklen_t;
             // SAFETY: address and len are writable storage for the socket address.
             let result = unsafe {
                 if peer {
-                    libc::getpeername(
-                        self.fd(),
-                        (&mut address as *mut L2capAddress).cast(),
-                        &mut len,
-                    )
+                    libc::getpeername(self.fd(), (&raw mut address).cast(), &raw mut len)
                 } else {
-                    libc::getsockname(
-                        self.fd(),
-                        (&mut address as *mut L2capAddress).cast(),
-                        &mut len,
-                    )
+                    libc::getsockname(self.fd(), (&raw mut address).cast(), &raw mut len)
                 }
             };
             if result < 0 {
                 return Err(io::Error::last_os_error());
             }
-            if len as usize != mem::size_of_val(&address)
+            if len as usize != size_of_val(&address)
                 || address.family != libc::AF_BLUETOOTH as libc::sa_family_t
                 || address.address != expected.to_le_bytes()
                 || address.address_type != kind
@@ -254,8 +252,8 @@ impl Socket {
         let result = unsafe {
             libc::connect(
                 fd.as_raw_fd(),
-                (&remote as *const L2capAddress).cast(),
-                mem::size_of_val(&remote) as _,
+                (&raw const remote).cast(),
+                size_of_val(&remote) as _,
             )
         };
         if result < 0 && io::Error::last_os_error().raw_os_error() != Some(libc::EINPROGRESS) {
@@ -345,10 +343,10 @@ mod tests {
     use super::*;
     #[test]
     fn bluetooth_socket_abi_layouts() {
-        assert_eq!(mem::size_of::<L2capConnectionInfo>(), 6);
-        assert_eq!(mem::size_of::<L2capAddress>(), 14);
-        assert_eq!(mem::size_of::<HciAddress>(), 6);
-        assert_eq!(mem::size_of::<HciFilter>(), 16);
+        assert_eq!(size_of::<L2capConnectionInfo>(), 6);
+        assert_eq!(size_of::<L2capAddress>(), 14);
+        assert_eq!(size_of::<HciAddress>(), 6);
+        assert_eq!(size_of::<HciFilter>(), 16);
     }
     #[tokio::test]
     async fn first_write_after_nonblocking_connect_preserves_readiness() {
@@ -383,8 +381,8 @@ mod tests {
         let result = unsafe {
             libc::connect(
                 fd.as_raw_fd(),
-                (&address as *const libc::sockaddr_in).cast(),
-                mem::size_of_val(&address) as _,
+                (&raw const address).cast(),
+                size_of_val(&address) as _,
             )
         };
         assert_eq!(result, -1);

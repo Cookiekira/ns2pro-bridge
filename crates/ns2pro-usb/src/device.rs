@@ -1,5 +1,8 @@
-//! Complete NS2Pro USB device model, ported from VIIPER's GPL implementation.
-use crate::descriptors::*;
+//! Complete `NS2Pro` USB device model, ported from VIIPER's GPL implementation.
+use crate::descriptors::{
+    CONFIG_DESC_FULL, DEVICE_DESC, HID_DESC, HID_REPORT_DESC, MSOS_COMPAT_ID, MSOS_EXT_PROPS,
+    STRING_0, STRING_1, STRING_2, STRING_3, STRING_4, STRING_5, STRING_6, STRING_EE,
+};
 use ns2pro_proto::{
     InputState,
     input::{COMMON_BUTTON_LAYOUT, encode_buttons, pack_stick12},
@@ -42,7 +45,7 @@ impl Default for Ns2ProDevice {
     }
 }
 impl Ns2ProDevice {
-    pub fn set_identity(&mut self, identity: Option<[u8; 64]>) {
+    pub const fn set_identity(&mut self, identity: Option<[u8; 64]>) {
         self.identity = identity;
     }
     fn flash_block(&self, address: u32) -> [u8; 64] {
@@ -151,15 +154,15 @@ impl Ns2ProDevice {
                             [(1, 4, 7), (2, 5, 7), (4, 6, 1), (0x10, 8, 3), (0x20, 9, 3)]
                         {
                             if flags & flag != 0 {
-                                p[i] = v
+                                p[i] = v;
                             }
                         }
-                        r.extend(p)
+                        r.extend(p);
                     }
                     2 => self.mask = flags,
                     3 => {
                         self.mask = 0;
-                        self.features = 0
+                        self.features = 0;
                     }
                     4 => self.features |= masked,
                     5 => self.features &= !masked,
@@ -250,6 +253,7 @@ impl Ns2ProDevice {
         Ok((data, event))
     }
 }
+#[must_use]
 pub fn flash_block(address: u32) -> [u8; 64] {
     let mut b = [0; 64];
     match address {

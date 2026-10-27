@@ -171,7 +171,7 @@ async fn wait_for_identity(channels: &Channels, cancel: &CancellationToken) -> b
         }
         tokio::select! {
             biased;
-            _ = cancel.cancelled() => return false,
+            () = cancel.cancelled() => return false,
             changed = identity.changed() => {
                 if changed.is_err() {
                     return false;
@@ -252,7 +252,7 @@ mod tests {
                 None => std::future::pending().await,
             }
         }
-        async fn detach(&self, _: &mut ()) -> Result<(), AttachError> {
+        async fn detach(&self, (): &mut ()) -> Result<(), AttachError> {
             self.events.push("detach");
             Ok(())
         }
@@ -358,7 +358,7 @@ mod tests {
             drop(peer);
             tokio::select! {
                 _ = &mut run => panic!("attachment finished before application drain"),
-                _ = draining.cancelled() => {},
+                () = draining.cancelled() => {},
             }
             assert!(futures::poll!(&mut run).is_pending());
             events.assert(&["attach", "lease", "draining"]);

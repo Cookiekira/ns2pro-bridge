@@ -59,7 +59,7 @@ pub async fn serve_urbs<S: AsyncRead + AsyncWrite + Unpin>(
         };
         tokio::select! {
             biased;
-            _ = cancel.cancelled() => return Ok(()),
+            () = cancel.cancelled() => return Ok(()),
             changed = identity.changed() => {
                 if changed.is_err() {
                     return Ok(());
@@ -76,12 +76,12 @@ pub async fn serve_urbs<S: AsyncRead + AsyncWrite + Unpin>(
                 let (u, data) = frame.expect("URB stream is infinite")?;
                 engine.submit(u, &data, now(), &mut effects);
             }
-            _ = timer => engine.on_keepalive_due(now(), &mut effects),
+            () = timer => engine.on_keepalive_due(now(), &mut effects),
         }
         // ACK accepted OUT before waking controller output work. write_all handles short writes.
         if !effects.replies.is_empty() {
             tokio::select! {
-                _ = cancel.cancelled() => return Ok(()),
+                () = cancel.cancelled() => return Ok(()),
                 result = writer.write_all(&effects.replies) => result?,
             }
             effects.replies.clear();
@@ -94,7 +94,7 @@ pub async fn serve_urbs<S: AsyncRead + AsyncWrite + Unpin>(
                 .completion(seq, completions, keepalives);
         }
         for output in effects.outputs.drain(..) {
-            channels.output(output)
+            channels.output(output);
         }
     }
 }

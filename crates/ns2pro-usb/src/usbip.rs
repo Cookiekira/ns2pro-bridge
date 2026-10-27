@@ -37,6 +37,7 @@ impl Urb {
             unlink_seq: get(20),
         })
     }
+    #[must_use]
     pub fn header(self) -> [u8; 48] {
         let mut h = [0; 48];
         for (i, v) in [
@@ -83,21 +84,26 @@ pub struct ManagementRequest {
     valid: bool,
 }
 impl ManagementRequest {
+    #[must_use]
     pub fn parse(header: &[u8; 8]) -> Self {
         Self {
             op: u16::from_be_bytes([header[2], header[3]]),
             valid: header[..2] == [1, 0x11] && header[4..] == [0; 4],
         }
     }
-    pub fn is_import(self) -> bool {
+    #[must_use]
+    pub const fn is_import(self) -> bool {
         self.op == 0x8003
     }
+    #[must_use]
     pub fn valid_busid(self, busid: &[u8; 32]) -> bool {
         self.valid && busid[..3] == *b"1-1" && busid[3..].iter().all(|b| *b == 0)
     }
-    pub fn keep_open(self) -> bool {
+    #[must_use]
+    pub const fn keep_open(self) -> bool {
         self.valid && self.op == 0x8005
     }
+    #[must_use]
     pub fn reply(self, busid: Option<&[u8; 32]>) -> Vec<u8> {
         let valid = match self.op {
             0x8005 => self.valid,
@@ -108,6 +114,7 @@ impl ManagementRequest {
     }
 }
 /// Fixed single-device export. Descriptors and interface classes match VIIPER.
+#[must_use]
 pub fn management_reply(op: u16, valid: bool) -> Vec<u8> {
     let mut b = vec![
         1,

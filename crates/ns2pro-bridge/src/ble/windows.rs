@@ -1,4 +1,4 @@
-//! Native WinRT transport. Controller/session protocol lives in shared services.
+//! Native `WinRT` transport. Controller/session protocol lives in shared services.
 use super::{
     BleError, Bluetooth, CONNECT_TIMEOUT, ConnectionReport, ConnectionTarget, Discovered, GattLink,
     LinkError, NotificationSink, PreferenceOutcome, SCAN_TIMEOUT,
@@ -141,7 +141,7 @@ impl WindowsBluetooth {
         tokio::select! {
             biased;
             reason = rx.recv() => return Err(BleError::Platform(format!("Bluetooth smoke scan stopped early: {reason:?}; check adapter power and permissions"))),
-            _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+            () = tokio::time::sleep(Duration::from_millis(500)) => {}
         }
         if scope.watcher.Status().map_err(ble)? != BluetoothLEAdvertisementWatcherStatus::Started {
             return Err(BleError::Platform(
@@ -336,8 +336,7 @@ impl Bluetooth for WindowsBluetooth {
             for kind in Characteristic::ALL {
                 if !characteristics.contains_key(&kind) {
                     return Err(BleError::Platform(format!(
-                        "Required GATT characteristic missing: {:?}",
-                        kind
+                        "Required GATT characteristic missing: {kind:?}"
                     )));
                 }
             }
@@ -373,7 +372,7 @@ impl Bluetooth for WindowsBluetooth {
                 resources.preference = Some(request);
             }
             Err(error) => {
-                tracing::debug!(%error, "ThroughputOptimized preference unavailable; using system parameters")
+                tracing::debug!(%error, "ThroughputOptimized preference unavailable; using system parameters");
             }
         }
         match resources
@@ -482,7 +481,7 @@ impl GattLink for WindowsGattLink {
         let buffer = writer.DetachBuffer().map_err(link)?;
         let status = tokio::select! {
             biased;
-            _ = self.closed.cancelled() => return Err(LinkError::Closed),
+            () = self.closed.cancelled() => return Err(LinkError::Closed),
             result = async {
                 winrt!(characteristic.WriteValueWithOptionAsync(&buffer, GattWriteOption::WriteWithoutResponse), link)
             } => result?,
@@ -534,7 +533,7 @@ impl GattLink for WindowsGattLink {
         };
         let status = tokio::select! {
             biased;
-            _ = self.closed.cancelled() => return Err(LinkError::Closed),
+            () = self.closed.cancelled() => return Err(LinkError::Closed),
             result = async {
                 winrt!(characteristic.WriteClientCharacteristicConfigurationDescriptorAsync(GattClientCharacteristicConfigurationDescriptorValue::Notify), link)
             } => result?,

@@ -33,6 +33,7 @@ impl Buttons {
     pub const C: Self = Self(1 << 20);
     pub const HEADSET: Self = Self(1 << 21);
 
+    #[must_use]
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
     }
@@ -75,6 +76,7 @@ pub const COMMON_BUTTON_LAYOUT: [ButtonBit; 22] = [
     (Buttons::HEADSET, 3, 0x10),
 ];
 
+#[must_use]
 pub fn decode_buttons(raw: &[u8], layout: &[ButtonBit]) -> Buttons {
     layout
         .iter()
@@ -109,6 +111,7 @@ impl Stick {
 }
 
 /// Unpacks two 12-bit values from three bytes.
+#[must_use]
 pub fn unpack_stick12(raw: [u8; 3]) -> (u16, u16) {
     let x = u16::from(raw[0]) | (u16::from(raw[1] & 0x0F) << 8);
     let y = (u16::from(raw[1]) >> 4) | (u16::from(raw[2]) << 4);
@@ -116,6 +119,7 @@ pub fn unpack_stick12(raw: [u8; 3]) -> (u16, u16) {
 }
 
 /// Packs two 12-bit values (clamped) into three bytes.
+#[must_use]
 pub fn pack_stick12(x: u16, y: u16) -> [u8; 3] {
     let x = x.min(STICK_MAX);
     let y = y.min(STICK_MAX);

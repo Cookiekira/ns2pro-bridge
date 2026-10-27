@@ -11,6 +11,7 @@ pub const DEFAULT_LED_PATTERN: u8 = 0x06;
 pub const RUMBLE_PACKET_LEN: usize = 42;
 
 /// `[cmd, 0x91, seq, sub, 0, len, 0, 0, payload..]`.
+#[must_use]
 pub fn command(cmd: u8, sub: u8, payload: &[u8]) -> Vec<u8> {
     let len = u8::try_from(payload.len()).expect("command payload fits in one byte");
     let mut out = vec![cmd, 0x91, 0x01, sub, 0x00, len, 0x00, 0x00];
@@ -45,19 +46,23 @@ pub fn response_payload(response: &[u8], cmd: u8, sub: u8) -> Result<&[u8], Resp
     Ok(&response[8..])
 }
 
+#[must_use]
 pub fn set_player_leds(mask: u8) -> Vec<u8> {
     command(0x09, 0x07, &[mask, 0, 0, 0, 0, 0, 0, 0])
 }
 
 /// Restricts later feature changes to `mask`.
+#[must_use]
 pub fn set_feature_mask(mask: u8) -> Vec<u8> {
     command(0x0C, 0x02, &[mask, 0, 0, 0])
 }
 
+#[must_use]
 pub fn enable_features(flags: u8) -> Vec<u8> {
     command(0x0C, 0x04, &[flags, 0, 0, 0])
 }
 
+#[must_use]
 pub fn spi_read(address: u32, size: u8) -> Vec<u8> {
     let mut payload = [0u8; 8];
     payload[0] = size;
@@ -81,6 +86,7 @@ pub fn spi_read_data(response: &[u8], address: u32) -> Result<&[u8], ResponseErr
 }
 
 /// `[0, left[16], right[16], 0..]` for [`crate::gatt::Characteristic::Vibration`].
+#[must_use]
 pub fn rumble_packet(left: &[u8; 16], right: &[u8; 16]) -> [u8; RUMBLE_PACKET_LEN] {
     let mut packet = [0u8; RUMBLE_PACKET_LEN];
     packet[1..17].copy_from_slice(left);

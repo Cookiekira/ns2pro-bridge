@@ -22,13 +22,15 @@ pub enum AppError {
     Platform(String),
 }
 impl AppError {
-    pub fn exit_code(&self) -> u8 {
+    #[must_use]
+    pub const fn exit_code(&self) -> u8 {
         match self {
             Self::Attach(_) | Self::UsbSetup(_) => 2,
             _ => 1,
         }
     }
-    pub fn hint(&self) -> &'static str {
+    #[must_use]
+    pub const fn hint(&self) -> &'static str {
         match self {
             Self::Bluetooth(_) => {
                 "Linux: check Bluetooth adapter availability. Windows: needs a Bluetooth LE adapter and permission."
@@ -59,8 +61,8 @@ async fn run_session<B: crate::ble::Bluetooth>(
     let shutdown = platform::shutdown().map_err(|e| AppError::Platform(e.to_string()))?;
     let stop = async {
         tokio::select! {
-            _ = cancel.cancelled() => {},
-            _ = shutdown => cancel.cancel(),
+            () = cancel.cancelled() => {},
+            () = shutdown => cancel.cancel(),
         }
     };
     let controller = async {
@@ -70,7 +72,7 @@ async fn run_session<B: crate::ble::Bluetooth>(
     };
     let diagnostics = crate::stats::diagnostics(channels.clone(), cancel.clone());
     let drain = async {
-        let (_, controller, _) = tokio::join!(stop, controller, diagnostics);
+        let ((), controller, ()) = tokio::join!(stop, controller, diagnostics);
         controller
     };
     usb.run(&channels, &cancel, drain).await
@@ -93,10 +95,10 @@ pub async fn run(options: Options) -> Result<(), AppError> {
 
 #[cfg(target_os = "linux")]
 mod platform {
-    use super::*;
+    use super::AppError;
     use crate::{ble::linux::LinuxBluetooth, rt::linux::PriorityGuard};
 
-    pub fn shutdown() -> std::io::Result<impl std::future::Future<Output = ()>> {
+    pub(super) fn shutdown() -> std::io::Result<impl Future<Output = ()>> {
         use tokio::signal::unix::{SignalKind, signal};
         let mut interrupt = signal(SignalKind::interrupt())?;
         let mut terminate = signal(SignalKind::terminate())?;
@@ -110,30 +112,30 @@ mod platform {
         })
     }
 
-    pub async fn initialize() -> Result<(Option<PriorityGuard>, LinuxBluetooth), AppError> {
+    pub(super) async fn initialize() -> Result<(Option<PriorityGuard>, LinuxBluetooth), AppError> {
         let priority = PriorityGuard::try_raise();
         let bluetooth = LinuxBluetooth::new().await?;
         Ok((priority, bluetooth))
     }
-    pub async fn close(bluetooth: &LinuxBluetooth) {
+    pub(super) async fn close(bluetooth: &LinuxBluetooth) {
         bluetooth.close().await;
     }
 }
 
 #[cfg(windows)]
 mod platform {
-    use super::*;
+    use super::AppError;
     use crate::{ble::windows::WindowsBluetooth, rt::windows::RuntimeGuard};
-    pub fn shutdown() -> std::io::Result<impl std::future::Future<Output = ()>> {
+    pub(super) fn shutdown() -> std::io::Result<impl Future<Output = ()>> {
         Ok(async {
             let _ = tokio::signal::ctrl_c().await;
         })
     }
 
-    pub async fn initialize() -> Result<(RuntimeGuard, WindowsBluetooth), AppError> {
+    pub(super) async fn initialize() -> Result<(RuntimeGuard, WindowsBluetooth), AppError> {
         let runtime = RuntimeGuard::new().map_err(|e| AppError::Platform(e.to_string()))?;
         let bluetooth = WindowsBluetooth::new().await?;
         Ok((runtime, bluetooth))
     }
-    pub async fn close(_: &WindowsBluetooth) {}
+    pub(super) async fn close(_: &WindowsBluetooth) {}
 }

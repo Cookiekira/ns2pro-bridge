@@ -11,7 +11,8 @@ pub enum Identity {
     Resolved(Option<[u8; 64]>),
 }
 impl Identity {
-    pub fn block(self) -> Option<[u8; 64]> {
+    #[must_use]
+    pub const fn block(self) -> Option<[u8; 64]> {
         match self {
             Self::Pending => None,
             Self::Resolved(block) => block,

@@ -23,11 +23,11 @@ impl PriorityGuard {
             return Err(io::Error::last_os_error());
         }
         let mut previous = libc::sched_param { sched_priority: 0 };
-        if unsafe { libc::sched_getparam(0, &mut previous) } < 0 {
+        if unsafe { libc::sched_getparam(0, &raw mut previous) } < 0 {
             return Err(io::Error::last_os_error());
         }
         let requested = libc::sched_param { sched_priority: 10 };
-        if unsafe { libc::sched_setscheduler(0, libc::SCHED_FIFO, &requested) } < 0 {
+        if unsafe { libc::sched_setscheduler(0, libc::SCHED_FIFO, &raw const requested) } < 0 {
             return Err(io::Error::last_os_error());
         }
         Ok(Self {
@@ -40,7 +40,9 @@ impl PriorityGuard {
 impl Drop for PriorityGuard {
     fn drop(&mut self) {
         // SAFETY: guard is !Send and holds the original scheduler settings.
-        if unsafe { libc::sched_setscheduler(0, self.previous_policy, &self.previous) } < 0 {
+        if unsafe { libc::sched_setscheduler(0, self.previous_policy, &raw const self.previous) }
+            < 0
+        {
             tracing::debug!(error=%io::Error::last_os_error(),"restore runtime priority failed");
         }
     }

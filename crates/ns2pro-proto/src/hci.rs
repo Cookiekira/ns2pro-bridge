@@ -15,11 +15,13 @@ impl ConnectionParameters {
         latency: 0,
         timeout: 200,
     };
+    #[must_use]
     pub fn interval_ms(self) -> f64 {
         f64::from(self.min) * 1.25
     }
 
     /// Encode an HCI LE Connection Update with no connection-event length hint.
+    #[must_use]
     pub fn encode_update(self, handle: u16) -> [u8; 18] {
         let mut p = [0; 18];
         p[..4].copy_from_slice(&[1, 0x13, 0x20, 14]);
@@ -33,7 +35,7 @@ impl ConnectionParameters {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Parameters {
     pub interval: u16,
     pub latency: u16,
@@ -55,7 +57,7 @@ impl Parameters {
         Ok(result)
     }
 }
-fn word(p: &[u8], offset: usize) -> u16 {
+const fn word(p: &[u8], offset: usize) -> u16 {
     u16::from_le_bytes([p[offset], p[offset + 1]])
 }
 

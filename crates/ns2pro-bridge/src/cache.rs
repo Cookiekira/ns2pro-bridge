@@ -18,9 +18,11 @@ struct Entry {
     address: String,
 }
 impl Cache {
-    pub fn new(path: PathBuf) -> Self {
+    #[must_use]
+    pub const fn new(path: PathBuf) -> Self {
         Self(path)
     }
+    #[must_use]
     pub fn select(&self, explicit: Option<Address>) -> Selection<'_> {
         let cached = self.load().unwrap_or_else(|e| {
             tracing::warn!(%e,"ignoring invalid cache");
@@ -66,7 +68,8 @@ impl Cache {
     }
 }
 impl Selection<'_> {
-    pub fn address(&self) -> Option<Address> {
+    #[must_use]
+    pub const fn address(&self) -> Option<Address> {
         self.address
     }
     pub fn settle(

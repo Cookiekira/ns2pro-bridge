@@ -24,7 +24,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
-pub struct FakeOptions {
+pub(crate) struct FakeOptions {
     pub fail_scan: bool,
     pub fail_connect: bool,
     pub fail_init: bool,
@@ -40,7 +40,7 @@ pub struct FakeOptions {
     pub adapter_address: Option<Address>,
 }
 #[derive(Clone, Default)]
-pub struct Observed {
+pub(crate) struct Observed {
     pub scans: Vec<Option<Address>>,
     pub connects: usize,
     pub closes: usize,
@@ -58,38 +58,38 @@ struct State {
     on_close: Option<Box<dyn FnOnce(NotificationSink) + Send>>,
 }
 #[derive(Clone, Default)]
-pub struct FakeController {
+pub(crate) struct FakeController {
     state: Arc<Mutex<State>>,
     closed: CancellationToken,
 }
 impl FakeController {
-    pub fn new(options: FakeOptions) -> Self {
+    pub(crate) fn new(options: FakeOptions) -> Self {
         let fake = Self::default();
         fake.configure(|o| *o = options);
         fake
     }
-    pub fn configure(&self, change: impl FnOnce(&mut FakeOptions)) {
+    pub(crate) fn configure(&self, change: impl FnOnce(&mut FakeOptions)) {
         change(&mut self.state.lock().unwrap().options);
     }
-    pub fn observed(&self) -> Observed {
+    pub(crate) fn observed(&self) -> Observed {
         self.state.lock().unwrap().observed.clone()
     }
-    pub fn writes(&self) -> Vec<(Characteristic, Vec<u8>)> {
+    pub(crate) fn writes(&self) -> Vec<(Characteristic, Vec<u8>)> {
         self.state.lock().unwrap().observed.writes.clone()
     }
-    pub fn ready(&self) -> bool {
+    pub(crate) fn ready(&self) -> bool {
         self.state.lock().unwrap().input.is_some()
     }
-    pub fn notify(&self, bytes: &[u8]) {
+    pub(crate) fn notify(&self, bytes: &[u8]) {
         self.state.lock().unwrap().input.as_mut().unwrap()(bytes);
     }
-    pub fn on_close(&self, hook: impl FnOnce(NotificationSink) + Send + 'static) {
+    pub(crate) fn on_close(&self, hook: impl FnOnce(NotificationSink) + Send + 'static) {
         self.state.lock().unwrap().on_close = Some(Box::new(hook));
     }
-    pub fn disconnect(&self, connection: usize) {
+    pub(crate) fn disconnect(&self, connection: usize) {
         self.state.lock().unwrap().connections[connection].cancel();
     }
-    pub fn emit(&self, buttons: Buttons) {
+    pub(crate) fn emit(&self, buttons: Buttons) {
         let mut p = [0u8; 64];
         encode_buttons(buttons, &COMMON_BUTTON_LAYOUT, &mut p[4..8]);
         p[10..13].copy_from_slice(&[0, 8, 0x80]);
@@ -156,7 +156,7 @@ impl Bluetooth for FakeController {
             )
         };
         if block {
-            std::future::pending::<()>().await
+            std::future::pending::<()>().await;
         }
         Ok(Discovered {
             address: target.unwrap_or(discovered),
@@ -227,12 +227,12 @@ impl GattLink for FakeController {
         }
     }
 }
-pub fn address(n: u64) -> Address {
+pub(crate) const fn address(n: u64) -> Address {
     Address::new(n).unwrap()
 }
-pub struct TestCache(PathBuf);
+pub(crate) struct TestCache(PathBuf);
 impl TestCache {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
             "ns2-test-controller-{}-{}",
@@ -242,7 +242,7 @@ impl TestCache {
         std::fs::create_dir_all(&root).unwrap();
         Self(root)
     }
-    pub fn path(&self) -> PathBuf {
+    pub(crate) fn path(&self) -> PathBuf {
         self.0.join("controller-cache.json")
     }
 }
@@ -251,21 +251,21 @@ impl Drop for TestCache {
         std::fs::remove_dir_all(&self.0).unwrap();
     }
 }
-pub fn options(cache: &TestCache) -> Options {
+pub(crate) fn options(cache: &TestCache) -> Options {
     let mut o = Options::parse_from(["bridge", "--no-auto-attach"]);
     o.cache_file = cache.path();
     o
 }
-pub async fn until(mut condition: impl FnMut() -> bool) {
+pub(crate) async fn until(mut condition: impl FnMut() -> bool) {
     for _ in 0..1000 {
         if condition() {
             return;
         }
-        tokio::task::yield_now().await
+        tokio::task::yield_now().await;
     }
     panic!("observable session progress did not occur")
 }
-pub fn urb(seq: u32) -> Urb {
+pub(crate) const fn urb(seq: u32) -> Urb {
     Urb {
         command: 1,
         seq,
@@ -277,7 +277,7 @@ pub fn urb(seq: u32) -> Urb {
         unlink_seq: 0,
     }
 }
-pub async fn report(peer: &mut tokio::io::DuplexStream, seq: u32) -> [u8; 64] {
+pub(crate) async fn report(peer: &mut tokio::io::DuplexStream, seq: u32) -> [u8; 64] {
     peer.write_all(&urb(seq).header()).await.unwrap();
     let mut header = [0; 48];
     peer.read_exact(&mut header).await.unwrap();

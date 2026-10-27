@@ -72,7 +72,7 @@ fn status_files(root: &Path) -> Result<Vec<PathBuf>, AttachError> {
                 || n.strip_prefix("status.")
                     .is_some_and(|s| s.parse::<u32>().is_ok())
         }) {
-            paths.push(path)
+            paths.push(path);
         }
     }
     paths.sort();
@@ -83,7 +83,7 @@ fn free_ports(root: &Path) -> Result<Vec<(PathBuf, Port)>, AttachError> {
     for path in status_files(root)? {
         for port in ports(&fs::read_to_string(&path)?)? {
             if port.status == 4 {
-                result.push((path.clone(), port))
+                result.push((path.clone(), port));
             }
         }
     }
@@ -158,7 +158,8 @@ impl Attached {
             "vhci ports were claimed concurrently; retry attach".into(),
         ))
     }
-    pub fn port(&self) -> u32 {
+    #[must_use]
+    pub const fn port(&self) -> u32 {
         self.port
     }
     /// Idempotent. A used port must still match the device/fd attached here.

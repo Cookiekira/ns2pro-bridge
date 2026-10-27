@@ -1,4 +1,4 @@
-//! Thread-bound WinRT apartment and best-effort MMCSS registration.
+//! Thread-bound `WinRT` apartment and best-effort MMCSS registration.
 use std::{marker::PhantomData, rc::Rc};
 use windows::{
     Win32::{
@@ -22,7 +22,7 @@ impl RuntimeGuard {
         // SAFETY: balanced by Drop on this same thread; MTA permits WinRT callbacks.
         unsafe { RoInitialize(RO_INIT_MULTITHREADED)? };
         let mut task = 0;
-        let mmcss = match unsafe { AvSetMmThreadCharacteristicsW(w!("Games"), &mut task) } {
+        let mmcss = match unsafe { AvSetMmThreadCharacteristicsW(w!("Games"), &raw mut task) } {
             Ok(handle) => Some(handle),
             Err(error) => {
                 tracing::debug!(%error, "MMCSS Games registration unavailable");

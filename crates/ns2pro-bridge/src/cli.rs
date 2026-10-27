@@ -28,7 +28,7 @@ pub struct Options {
     /// Feature flags (buttons, sticks, IMU); hexadecimal or decimal
     #[arg(long,default_value=default_feature_flags(),value_parser=parse_flags)]
     pub feature_flags: u8,
-    /// Log level: trace, debug, info, warn, error or off; RUST_LOG takes precedence
+    /// Log level: trace, debug, info, warn, error or off; `RUST_LOG` takes precedence
     #[arg(long, default_value = "info",value_parser=parse_level)]
     pub log_level: String,
     #[arg(long, hide = true)]
