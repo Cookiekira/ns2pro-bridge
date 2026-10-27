@@ -18,17 +18,26 @@ const SOL_BLUETOOTH: i32 = 274;
 const BT_SECURITY: i32 = 4;
 const BT_SECURITY_LOW: u8 = 1;
 const ATT_CID: u16 = 4;
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "AF_BLUETOOTH is 31; sockaddr families are u16 in the kernel ABI"
+)]
+const AF_BLUETOOTH: libc::sa_family_t = libc::AF_BLUETOOTH as libc::sa_family_t;
+
+/// Length argument for a fixed-size socket address or option structure.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "bounded by the compile-time assertion"
+)]
+const fn socklen<T>() -> libc::socklen_t {
+    const { assert!(size_of::<T>() <= u16::MAX as usize) };
+    size_of::<T>() as libc::socklen_t
+}
 
 fn bind<T>(fd: RawFd, address: &T) -> io::Result<()> {
     // SAFETY: callers supply initialized Linux socket address structures, borrowed
     // for this syscall only; the descriptor is owned by the caller.
-    let result = unsafe {
-        libc::bind(
-            fd,
-            std::ptr::from_ref::<T>(address).cast(),
-            size_of::<T>() as _,
-        )
-    };
+    let result = unsafe { libc::bind(fd, std::ptr::from_ref::<T>(address).cast(), socklen::<T>()) };
     if result < 0 {
         Err(io::Error::last_os_error())
     } else {
@@ -36,14 +45,15 @@ fn bind<T>(fd: RawFd, address: &T) -> io::Result<()> {
     }
 }
 fn setsockopt<T>(fd: RawFd, level: i32, option: i32, value: &T) -> io::Result<()> {
-    // SAFETY: callers pair each option with its initialized native value type.
+    // SAFETY: value is an initialized T borrowed for the call and the length is
+    // size_of::<T>(); callers pair each option with its native value type.
     let result = unsafe {
         libc::setsockopt(
             fd,
             level,
             option,
             std::ptr::from_ref::<T>(value).cast(),
-            size_of::<T>() as _,
+            socklen::<T>(),
         )
     };
     if result < 0 {
@@ -54,40 +64,41 @@ fn setsockopt<T>(fd: RawFd, level: i32, option: i32, value: &T) -> io::Result<()
 }
 fn getsockopt<T: Default>(fd: RawFd, level: i32, option: i32) -> io::Result<T> {
     let mut value = T::default();
-    let mut len = size_of::<T>() as libc::socklen_t;
-    // SAFETY: callers pair each option with writable native storage of its type.
+    let mut len = socklen::<T>();
+    // SAFETY: value and len are writable for the call and len starts at
+    // size_of::<T>(); callers pair each option with its native value type.
     let result =
         unsafe { libc::getsockopt(fd, level, option, (&raw mut value).cast(), &raw mut len) };
     if result < 0 {
         Err(io::Error::last_os_error())
-    } else if len as usize != size_of::<T>() {
+    } else if len != socklen::<T>() {
         Err(io::Error::other("unexpected socket option size"))
     } else {
         Ok(value)
     }
 }
 fn recv(fd: RawFd, p: &mut [u8]) -> io::Result<usize> {
-    // SAFETY: p is writable and fd remains valid for the syscall.
+    // SAFETY: p is valid for writes of p.len() bytes for the call. An invalid fd
+    // only yields EBADF.
     let n = unsafe { libc::recv(fd, p.as_mut_ptr().cast(), p.len(), libc::MSG_TRUNC) };
-    if n < 0 {
-        Err(io::Error::last_os_error())
-    } else if n as usize > p.len() {
+    // Negative means failure; MSG_TRUNC reports the full length of a longer packet.
+    let Ok(n) = usize::try_from(n) else {
+        return Err(io::Error::last_os_error());
+    };
+    if n > p.len() {
         Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "truncated Bluetooth packet",
         ))
     } else {
-        Ok(n as usize)
+        Ok(n)
     }
 }
 fn send(fd: RawFd, p: &[u8]) -> io::Result<usize> {
-    // SAFETY: p is readable and MSG_NOSIGNAL prevents SIGPIPE.
+    // SAFETY: p is valid for reads of p.len() bytes for the call. An invalid fd
+    // only yields EBADF; MSG_NOSIGNAL avoids SIGPIPE on a closed peer.
     let n = unsafe { libc::send(fd, p.as_ptr().cast(), p.len(), libc::MSG_NOSIGNAL) };
-    if n < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(n as usize)
-    }
+    usize::try_from(n).map_err(|_| io::Error::last_os_error())
 }
 fn check_write(n: usize, expected: usize) -> io::Result<()> {
     if n == expected {
@@ -140,7 +151,7 @@ impl Socket {
         // The filter affects only this socket; the kernel copies it during the syscall.
         setsockopt(fd.as_raw_fd(), SOL_HCI, HCI_FILTER, &filter)?;
         let address = HciAddress {
-            family: libc::AF_BLUETOOTH as _,
+            family: AF_BLUETOOTH,
             device: index,
             channel: HCI_CHANNEL_RAW,
         };
@@ -161,20 +172,21 @@ impl Socket {
         ] {
             // SAFETY: sockaddr_l2 is plain integer storage, fully initialized.
             let mut address: L2capAddress = unsafe { mem::zeroed() };
-            let mut len = size_of_val(&address) as libc::socklen_t;
-            // SAFETY: address and len are writable storage for the socket address.
-            let result = unsafe {
-                if peer {
-                    libc::getpeername(self.fd(), (&raw mut address).cast(), &raw mut len)
-                } else {
-                    libc::getsockname(self.fd(), (&raw mut address).cast(), &raw mut len)
-                }
+            let mut len = socklen::<L2capAddress>();
+            let storage = (&raw mut address).cast();
+            let result = if peer {
+                // SAFETY: storage and len point to writable sockaddr_l2 storage of `len`
+                // bytes that outlives the call; the descriptor is owned by self.
+                unsafe { libc::getpeername(self.fd(), storage, &raw mut len) }
+            } else {
+                // SAFETY: as for getpeername above.
+                unsafe { libc::getsockname(self.fd(), storage, &raw mut len) }
             };
             if result < 0 {
                 return Err(io::Error::last_os_error());
             }
-            if len as usize != size_of_val(&address)
-                || address.family != libc::AF_BLUETOOTH as libc::sa_family_t
+            if len != socklen::<L2capAddress>()
+                || address.family != AF_BLUETOOTH
                 || address.address != expected.to_le_bytes()
                 || address.address_type != kind
                 || address.cid != ATT_CID.to_le()
@@ -197,7 +209,7 @@ impl Socket {
         recv(self.fd(), p)
     }
     fn create(kind: i32, protocol: i32) -> io::Result<OwnedFd> {
-        // SAFETY: socket returns a new descriptor, transferred exactly once into OwnedFd.
+        // SAFETY: socket takes only integer arguments; the result is checked below.
         let fd = unsafe {
             libc::socket(
                 libc::AF_BLUETOOTH,
@@ -208,6 +220,7 @@ impl Socket {
         if fd < 0 {
             Err(io::Error::last_os_error())
         } else {
+            // SAFETY: socket succeeded, so fd is a fresh descriptor that nothing else owns.
             Ok(unsafe { OwnedFd::from_raw_fd(fd) })
         }
     }
@@ -218,7 +231,7 @@ impl Socket {
     pub(super) fn management() -> io::Result<Self> {
         let fd = Self::create(libc::SOCK_RAW, BTPROTO_HCI)?;
         let address = HciAddress {
-            family: libc::AF_BLUETOOTH as _,
+            family: AF_BLUETOOTH,
             device: HCI_DEV_NONE,
             channel: HCI_CHANNEL_CONTROL,
         };
@@ -234,7 +247,7 @@ impl Socket {
         let security = [BT_SECURITY_LOW, 0]; // struct bt_security { level, key_size }
         setsockopt(fd.as_raw_fd(), SOL_BLUETOOTH, BT_SECURITY, &security)?;
         let local = L2capAddress {
-            family: libc::AF_BLUETOOTH as _,
+            family: AF_BLUETOOTH,
             psm: 0,
             address: local.to_le_bytes(),
             cid: ATT_CID.to_le(),
@@ -242,18 +255,19 @@ impl Socket {
         };
         bind(fd.as_raw_fd(), &local)?;
         let remote = L2capAddress {
-            family: libc::AF_BLUETOOTH as _,
+            family: AF_BLUETOOTH,
             psm: 0,
             address: remote.to_le_bytes(),
             cid: ATT_CID.to_le(),
             address_type: address_type.to_mgmt(),
         };
-        // SAFETY: remote is a valid sockaddr_l2.
+        // SAFETY: remote is an initialized sockaddr_l2 borrowed for the call with its
+        // exact length; fd is owned by this function.
         let result = unsafe {
             libc::connect(
                 fd.as_raw_fd(),
                 (&raw const remote).cast(),
-                size_of_val(&remote) as _,
+                socklen::<L2capAddress>(),
             )
         };
         if result < 0 && io::Error::last_os_error().raw_os_error() != Some(libc::EINPROGRESS) {
@@ -281,15 +295,15 @@ impl Socket {
         self.0.get_ref().as_raw_fd()
     }
     pub(super) fn shutdown(&self) {
-        // SAFETY: fd is owned and valid; shutdown is idempotent.
+        // SAFETY: shutdown takes only integers; fd stays open while self exists and
+        // repeated shutdown is harmless.
         unsafe { libc::shutdown(self.fd(), libc::SHUT_RDWR) };
     }
     pub(super) async fn recv(&self, p: &mut [u8]) -> io::Result<usize> {
         loop {
             let mut guard = self.0.readable().await?;
-            match guard.try_io(|fd| recv(fd.as_raw_fd(), p)) {
-                Ok(result) => return result,
-                Err(_) => continue,
+            if let Ok(result) = guard.try_io(|fd| recv(fd.as_raw_fd(), p)) {
+                return result;
             }
         }
     }
@@ -309,34 +323,33 @@ impl Socket {
     async fn send_packet(&self, p: &[u8]) -> io::Result<usize> {
         loop {
             let mut guard = self.0.writable().await?;
-            match guard.try_io(|fd| send(fd.as_raw_fd(), p)) {
-                Ok(result) => return result,
-                Err(_) => continue,
+            if let Ok(result) = guard.try_io(|fd| send(fd.as_raw_fd(), p)) {
+                return result;
             }
         }
     }
 }
 #[cfg(test)]
 pub(super) fn pair() -> (Socket, Socket) {
-    let mut fds = [-1; 2]; // SAFETY: fds stores both returned descriptors.
-    assert_eq!(
-        unsafe {
-            libc::socketpair(
-                libc::AF_UNIX,
-                libc::SOCK_SEQPACKET | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
-                0,
-                fds.as_mut_ptr(),
-            )
-        },
-        0
-    );
-    // SAFETY: each fresh descriptor is transferred once.
-    unsafe {
-        (
-            Socket::from_owned(OwnedFd::from_raw_fd(fds[0])).unwrap(),
-            Socket::from_owned(OwnedFd::from_raw_fd(fds[1])).unwrap(),
+    let mut fds = [-1; 2];
+    // SAFETY: fds is writable storage for the two descriptors socketpair returns.
+    let result = unsafe {
+        libc::socketpair(
+            libc::AF_UNIX,
+            libc::SOCK_SEQPACKET | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
+            0,
+            fds.as_mut_ptr(),
         )
-    }
+    };
+    assert_eq!(result, 0);
+    // SAFETY: socketpair succeeded, so fds[0] is fresh and transferred exactly once.
+    let a = unsafe { OwnedFd::from_raw_fd(fds[0]) };
+    // SAFETY: as above, for fds[1].
+    let b = unsafe { OwnedFd::from_raw_fd(fds[1]) };
+    (
+        Socket::from_owned(a).unwrap(),
+        Socket::from_owned(b).unwrap(),
+    )
 }
 #[cfg(test)]
 mod tests {
@@ -359,8 +372,7 @@ mod tests {
         // Exercise the native connect-completion and send path without requiring
         // a Bluetooth adapter: TCP has the same edge-triggered writable state.
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        // SAFETY: socket returns a fresh owned descriptor; sockaddr_in is fully
-        // initialized and only borrowed for the connect syscall.
+        // SAFETY: socket takes only integer arguments; the result is checked below.
         let fd = unsafe {
             libc::socket(
                 libc::AF_INET,
@@ -369,20 +381,22 @@ mod tests {
             )
         };
         assert!(fd >= 0);
+        // SAFETY: socket succeeded, so fd is fresh and transferred exactly once.
         let fd = unsafe { OwnedFd::from_raw_fd(fd) };
         let address = libc::sockaddr_in {
-            sin_family: libc::AF_INET as _,
+            sin_family: libc::sa_family_t::try_from(libc::AF_INET).unwrap(),
             sin_port: listener.local_addr().unwrap().port().to_be(),
             sin_addr: libc::in_addr {
                 s_addr: u32::from_ne_bytes([127, 0, 0, 1]),
             },
             sin_zero: [0; 8],
         };
+        // SAFETY: address is an initialized sockaddr_in borrowed for the call; fd is owned.
         let result = unsafe {
             libc::connect(
                 fd.as_raw_fd(),
                 (&raw const address).cast(),
-                size_of_val(&address) as _,
+                socklen::<libc::sockaddr_in>(),
             )
         };
         assert_eq!(result, -1);

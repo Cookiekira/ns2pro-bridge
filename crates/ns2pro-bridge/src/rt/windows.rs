@@ -18,10 +18,18 @@ pub struct RuntimeGuard {
     _thread_bound: PhantomData<Rc<()>>,
 }
 impl RuntimeGuard {
+    /// Joins the multithreaded `WinRT` apartment and requests MMCSS "Games"
+    /// scheduling; MMCSS failure is logged and ignored.
+    ///
+    /// # Errors
+    ///
+    /// When `RoInitialize` fails.
     pub fn new() -> windows::core::Result<Self> {
         // SAFETY: balanced by Drop on this same thread; MTA permits WinRT callbacks.
         unsafe { RoInitialize(RO_INIT_MULTITHREADED)? };
         let mut task = 0;
+        // SAFETY: the task name is a static NUL-terminated string and task is writable
+        // u32 storage for the call; the handle is reverted in Drop on this thread.
         let mmcss = match unsafe { AvSetMmThreadCharacteristicsW(w!("Games"), &raw mut task) } {
             Ok(handle) => Some(handle),
             Err(error) => {
@@ -37,11 +45,14 @@ impl RuntimeGuard {
 }
 impl Drop for RuntimeGuard {
     fn drop(&mut self) {
+        // SAFETY: handle came from AvSetMmThreadCharacteristicsW on this thread (the
+        // guard is !Send) and take() ensures it is reverted once.
         if let Some(handle) = self.mmcss.take()
             && let Err(error) = unsafe { AvRevertMmThreadCharacteristics(handle) }
         {
             tracing::debug!(%error, "MMCSS Games release failed");
         }
+        // SAFETY: balances the successful RoInitialize in new() on the same thread.
         unsafe { RoUninitialize() };
     }
 }
