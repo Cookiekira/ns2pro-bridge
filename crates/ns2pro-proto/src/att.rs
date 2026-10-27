@@ -203,7 +203,11 @@ impl Discovery {
     /// peer rejects a request with anything other than "attribute not found".
     pub fn on_response(&mut self, p: &[u8]) -> Result<(), AttError> {
         let request = self.request().ok_or(AttError::Malformed)?;
-        let &opcode = request.first().ok_or(AttError::Malformed)?;
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "every request starts with its opcode"
+        )]
+        let opcode = request[0];
         if p.first() == Some(&ERROR_RESPONSE) {
             return self.on_error_response(p, opcode);
         }
@@ -290,10 +294,10 @@ impl Discovery {
                 return Err(AttError::Malformed);
             }
             let kind = if size == 21 {
-                let mut bytes: [u8; 16] = e
-                    .get(5..)
-                    .and_then(|uuid| uuid.try_into().ok())
-                    .ok_or(AttError::Malformed)?;
+                // chunks_exact(21) leaves exactly 16 UUID bytes after offset 5.
+                let Some(&mut mut bytes) = e.last_chunk::<16>().copied().as_mut() else {
+                    unreachable!("21-byte entry");
+                };
                 bytes.reverse();
                 Characteristic::from_uuid(Uuid::from_bytes(bytes))
             } else {

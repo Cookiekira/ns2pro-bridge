@@ -3,7 +3,7 @@ use crate::channels::Channels;
 use futures::StreamExt;
 use ns2pro_usb::{
     engine::{Effects, UrbEngine},
-    usbip::{MAX_TRANSFER, Urb},
+    usbip::Urb,
 };
 use std::{io, time::Duration};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -13,12 +13,6 @@ async fn read_urb<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<(Urb, Vec<
     reader.read_exact(&mut h).await?;
     let u = Urb::decode(&h).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     let mut data = vec![0; if u.direction == 0 { u.length } else { 0 }];
-    if data.len() > MAX_TRANSFER {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "transfer too large",
-        ));
-    }
     reader.read_exact(&mut data).await?;
     Ok((u, data))
 }

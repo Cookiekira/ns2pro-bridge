@@ -336,7 +336,12 @@ impl Attached {
                         error
                     }
                 })?;
-                let port_len = u32::try_from(wire::PORT_END).map_err(platform)?;
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_possible_truncation,
+                    reason = "PORT_END is 8"
+                )]
+                let port_len = wire::PORT_END as u32;
                 for abi in wire::Abi::SUPPORTED {
                     let mut request = wire::plugin(address, abi).map_err(platform)?;
                     match ioctl(
