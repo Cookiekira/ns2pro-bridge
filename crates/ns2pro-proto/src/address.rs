@@ -1,3 +1,4 @@
+//! Bluetooth device addresses and their LE address types.
 use std::fmt;
 use std::str::FromStr;
 
@@ -5,11 +6,13 @@ use std::str::FromStr;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Address(u64);
 
+/// Error for an address string without exactly 12 hex digits.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("invalid Bluetooth address `{0}`: expected 12 hex digits such as AA:BB:CC:DD:EE:FF")]
 pub struct ParseAddressError(String);
 
 impl Address {
+    /// Largest 48-bit address value.
     pub const MAX: u64 = 0xFFFF_FFFF_FFFF;
 
     /// Returns `None` when `value` does not fit in 48 bits.
@@ -22,6 +25,7 @@ impl Address {
         }
     }
 
+    /// The address as an integer; the first displayed byte is the most significant.
     #[must_use]
     pub const fn value(self) -> u64 {
         self.0
@@ -42,6 +46,7 @@ impl Address {
         b
     }
 
+    /// Builds an address from bytes in display order (most significant first).
     #[must_use]
     pub fn from_be_bytes(bytes: [u8; 6]) -> Self {
         let mut wide = [0u8; 8];
@@ -105,7 +110,9 @@ mod tests {
 /// LE identity kind, independent of the transport's numeric encoding.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LeAddressType {
+    /// Public device address.
     Public,
+    /// Random device address (static or private).
     Random,
 }
 impl LeAddressType {
@@ -118,6 +125,7 @@ impl LeAddressType {
             _ => None,
         }
     }
+    /// Linux management and L2CAP code; inverse of [`Self::from_mgmt`].
     #[must_use]
     pub const fn to_mgmt(self) -> u8 {
         match self {

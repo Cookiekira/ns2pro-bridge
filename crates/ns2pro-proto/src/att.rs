@@ -2,7 +2,9 @@
 use crate::gatt::Characteristic;
 use uuid::Uuid;
 
+/// `ATT_MTU` before an MTU exchange.
 pub const DEFAULT_MTU: u16 = 23;
+/// `ATT_MTU` the bridge requests and offers.
 pub const MTU: u16 = 247;
 /// [`MTU`] as a buffer length.
 #[expect(
@@ -10,9 +12,13 @@ pub const MTU: u16 = 247;
     reason = "u16 to usize is lossless; `From` is not usable in const items"
 )]
 pub const MTU_LEN: usize = MTU as usize;
+/// Error Response opcode.
 pub const ERROR_RESPONSE: u8 = 0x01;
+/// Write Response PDU.
 pub const WRITE_RESPONSE: [u8; 1] = [0x13];
+/// Handle Value Confirmation PDU, acknowledging an indication.
 pub const HANDLE_VALUE_CONFIRMATION: [u8; 1] = [0x1e];
+/// "Request Not Supported" error code.
 pub const REQUEST_NOT_SUPPORTED: u8 = 0x06;
 
 /// Encodes a Write Command into `buffer`; `None` when `buffer` is too small.
@@ -24,32 +30,47 @@ pub fn write_command<'a>(buffer: &'a mut [u8], handle: u16, value: &[u8]) -> Opt
     body.copy_from_slice(value);
     Some(packet)
 }
+/// Write Request enabling notifications through the CCCD at `handle`.
 #[must_use]
 pub const fn cccd_write_request(handle: u16) -> [u8; 5] {
     let [a, b] = handle.to_le_bytes();
     [0x12, a, b, 1, 0]
 }
+/// Exchange MTU Request for [`MTU`].
 #[must_use]
 pub const fn mtu_request() -> [u8; 3] {
     let [a, b] = MTU.to_le_bytes();
     [0x02, a, b]
 }
+/// Exchange MTU Response offering [`MTU`].
 #[must_use]
 pub const fn mtu_response() -> [u8; 3] {
     let [a, b] = MTU.to_le_bytes();
     [0x03, a, b]
 }
+/// Error Response rejecting the peer's `request` opcode at `handle` with `code`.
 #[must_use]
 pub const fn error_response(request: u8, handle: u16, code: u8) -> [u8; 5] {
     let [a, b] = handle.to_le_bytes();
     [ERROR_RESPONSE, request, a, b, code]
 }
+/// ATT discovery or exchange failure.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AttError {
+    /// A PDU that is malformed or does not answer the outstanding request.
     #[error("malformed or out-of-order ATT PDU")]
     Malformed,
+    /// The peer rejected `request` at `handle` with error `code`.
     #[error("ATT request {request:#04x}, handle {handle:#06x}: error {code:#04x}")]
-    Remote { request: u8, handle: u16, code: u8 },
+    Remote {
+        /// Opcode of the rejected request.
+        request: u8,
+        /// Handle the error refers to.
+        handle: u16,
+        /// ATT error code.
+        code: u8,
+    },
+    /// A required characteristic, or its CCCD, was not discovered.
     #[error("required characteristic or CCCD missing: {0:?}")]
     Missing(Characteristic),
 }
@@ -60,10 +81,14 @@ fn word(b: &[u8], n: usize) -> Result<u16, AttError> {
         .map(u16::from_le_bytes)
         .ok_or(AttError::Malformed)
 }
+/// Discovered handles of one characteristic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Handles {
+    /// Which characteristic these handles belong to.
     pub characteristic: Characteristic,
+    /// Value handle, used for writes and notifications.
     pub value: u16,
+    /// Client Characteristic Configuration handle; present for notifying characteristics.
     pub cccd: Option<u16>,
 }
 #[derive(Debug, Clone, Copy)]
@@ -86,6 +111,8 @@ enum Stage {
     Descriptors(usize, usize, u16),
     Done,
 }
+/// Sans-I/O GATT discovery. Send [`Self::request`], pass the answer to
+/// [`Self::on_response`], repeat until there is no request, then call [`Self::finish`].
 #[derive(Debug)]
 pub struct Discovery {
     stage: Stage,
@@ -126,6 +153,7 @@ fn range(op: u8, start: u16, end: u16, uuid: Option<u16>) -> Vec<u8> {
     p
 }
 impl Discovery {
+    /// Starts discovery with an MTU exchange.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -135,10 +163,12 @@ impl Discovery {
             mtu: DEFAULT_MTU,
         }
     }
+    /// Negotiated `ATT_MTU`; [`DEFAULT_MTU`] until the exchange succeeds.
     #[must_use]
     pub const fn mtu(&self) -> u16 {
         self.mtu
     }
+    /// The next request PDU, or `None` once discovery is done.
     #[must_use]
     #[expect(
         clippy::indexing_slicing,
@@ -383,17 +413,27 @@ impl Discovery {
 /// Classify asynchronous peer traffic without copying notification payloads.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Packet<'a> {
+    /// Handle Value Notification or Indication.
     Notification {
+        /// Attribute handle of the notified value.
         handle: u16,
+        /// Notified value, borrowed from the PDU.
         value: &'a [u8],
+        /// The peer expects a [`HANDLE_VALUE_CONFIRMATION`].
         indication: bool,
     },
+    /// The peer's Exchange MTU Request, carrying its MTU.
     Mtu(u16),
+    /// A peer request the bridge answers with an Error Response.
     Request {
+        /// Request opcode.
         opcode: u8,
+        /// First handle in the request, or 0 when the PDU has none.
         handle: u16,
     },
+    /// A response, including an Error Response, to the bridge's outstanding request.
     Response(&'a [u8]),
+    /// A command, confirmation or other PDU that needs no action.
     Ignore,
 }
 /// # Errors

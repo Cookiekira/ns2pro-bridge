@@ -8,6 +8,7 @@ pub const PRIMARY_FACTORY_ADDRESS: u32 = 0x13080;
 pub const SECONDARY_FACTORY_ADDRESS: u32 = 0x130C0;
 /// User calibration block for both sticks.
 pub const USER_ADDRESS: u32 = 0x1F_C040;
+/// Bytes read from each calibration block.
 pub const BLOCK_SIZE: u8 = 0x40;
 
 const FACTORY_OFFSET: usize = 0x28;
@@ -19,11 +20,17 @@ const USER_BLOCK_MIN_LEN: usize = 0x2B;
 /// Center and per-direction spans of one stick, in raw 12-bit units.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StickCalibration {
+    /// Raw X at rest.
     pub center_x: i32,
+    /// Raw Y at rest.
     pub center_y: i32,
+    /// Raw X span from rest to full deflection toward larger values.
     pub max_x: i32,
+    /// Raw Y span from rest to full deflection toward larger values.
     pub max_y: i32,
+    /// Raw X span from rest to full deflection toward smaller values.
     pub min_x: i32,
+    /// Raw Y span from rest to full deflection toward smaller values.
     pub min_y: i32,
 }
 
@@ -51,9 +58,12 @@ impl StickCalibration {
     }
 }
 
+/// Calibration for both sticks; `None` leaves that stick uncalibrated.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Calibration {
+    /// Left stick.
     pub primary: Option<StickCalibration>,
+    /// Right stick.
     pub secondary: Option<StickCalibration>,
 }
 

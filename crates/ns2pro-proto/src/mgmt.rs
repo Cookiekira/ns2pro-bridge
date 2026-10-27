@@ -3,6 +3,7 @@ use crate::{
     Address, LeAddressType,
     advertisement::{self, AdvertisementMode},
 };
+/// A management packet with inconsistent lengths or unknown values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("malformed Bluetooth management packet")]
 pub struct Malformed;
@@ -13,20 +14,32 @@ fn word(p: &[u8], n: usize) -> Result<u16, Malformed> {
         .map(u16::from_le_bytes)
         .ok_or(Malformed)
 }
+/// Read Controller Index List command.
 pub const READ_INDEX_LIST: u16 = 3;
+/// Read Controller Information command.
 pub const READ_INFO: u16 = 4;
+/// Set Powered command.
 pub const SET_POWERED: u16 = 5;
+/// Disconnect command.
 pub const DISCONNECT: u16 = 0x14;
+/// Get Connections command.
 pub const GET_CONNECTIONS: u16 = 0x15;
+/// Start Discovery command.
 pub const START_DISCOVERY: u16 = 0x23;
+/// Stop Discovery command.
 pub const STOP_DISCOVERY: u16 = 0x24;
+/// Device Found event.
 pub const DEVICE_FOUND: u16 = 0x12;
+/// Discovery address-type mask for LE public and random devices.
 pub const LE_DISCOVERY: u8 = 6;
+/// "Busy" command status.
 pub const BUSY: u8 = 10;
 /// Management also represents classic Bluetooth connections (wire value 0).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddressType {
+    /// Classic BR/EDR device.
     BrEdr,
+    /// LE device of the given address type.
     Le(LeAddressType),
 }
 impl AddressType {
@@ -44,6 +57,7 @@ impl AddressType {
                 .ok_or(Malformed)
         }
     }
+    /// Management wire value; inverse of [`Self::from_code`].
     #[must_use]
     pub const fn code(self) -> u8 {
         match self {
@@ -52,9 +66,12 @@ impl AddressType {
         }
     }
 }
+/// A device address as management encodes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Device {
+    /// The device address.
     pub address: Address,
+    /// Its address type.
     pub address_type: AddressType,
 }
 impl Device {
@@ -76,6 +93,7 @@ impl Device {
             address_type,
         })
     }
+    /// Little-endian address followed by the address type.
     #[must_use]
     pub fn encode(self) -> [u8; 7] {
         let mut p = [0; 7];
@@ -84,10 +102,14 @@ impl Device {
         p
     }
 }
+/// One management command or event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Frame<'a> {
+    /// Command or event code.
     pub opcode: u16,
+    /// Controller index, or `0xFFFF` for none.
     pub index: u16,
+    /// Parameters after the 6-byte header.
     pub payload: &'a [u8],
 }
 impl<'a> Frame<'a> {
@@ -124,10 +146,14 @@ pub fn command(opcode: u16, index: u16, payload: &[u8]) -> Result<Vec<u8>, Malfo
     out.extend(payload);
     Ok(out)
 }
+/// A Command Complete or Command Status event.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Completion<'a> {
+    /// The command it answers.
     pub command: u16,
+    /// Management status; 0 is success.
     pub status: u8,
+    /// Return parameters, empty for Command Status.
     pub data: &'a [u8],
 }
 /// Extracts a Command Complete or Command Status event; other events yield `None`.
@@ -181,17 +207,23 @@ pub fn connections(p: &[u8]) -> Result<Vec<Device>, Malformed> {
         .map(|p| Device::decode(p))
         .collect()
 }
+/// The parts of Read Controller Information the bridge uses.
 #[derive(Debug, Clone, Copy)]
 pub struct AdapterInfo {
+    /// Adapter address.
     pub address: Address,
+    /// Supported settings bitmask.
     pub supported: u32,
+    /// Current settings bitmask.
     pub current: u32,
 }
 impl AdapterInfo {
+    /// Whether the adapter supports Bluetooth LE.
     #[must_use]
     pub const fn supports_le(&self) -> bool {
         self.supported & (1 << 9) != 0
     }
+    /// Whether the adapter is powered.
     #[must_use]
     pub const fn powered(&self) -> bool {
         self.current & 1 != 0
@@ -233,11 +265,16 @@ pub fn adapter_info(p: &[u8]) -> Result<AdapterInfo, Malformed> {
         current: u32::from_le_bytes([c0, c1, c2, c3]),
     })
 }
+/// A Device Found event.
 #[derive(Debug)]
 pub struct Found<'a> {
+    /// The device.
     pub device: Device,
+    /// Received signal strength, in dBm.
     pub rssi: i8,
+    /// Device Found flags.
     pub flags: u32,
+    /// Extended inquiry response or advertising data.
     pub eir: &'a [u8],
 }
 /// Decodes a Device Found event.

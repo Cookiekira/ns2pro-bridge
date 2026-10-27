@@ -7,17 +7,25 @@ use aes::{
     Aes128,
     cipher::{BlockCipherEncrypt, KeyInit},
 };
+/// Failure while pairing the host with the controller.
 #[derive(Debug, thiserror::Error)]
 pub enum PairingError {
+    /// The reply was malformed or answered a different command.
     #[error(transparent)]
     Response(#[from] ResponseError),
+    /// The controller refused a step (carries its subcommand), or a reply arrived after
+    /// pairing finished (carries the stage).
     #[error("pairing rejected at stage {0}")]
     Rejected(u8),
+    /// The controller's confirmation does not match the derived long-term key.
     #[error("LTK confirmation mismatch")]
     Confirmation,
+    /// The host address is zero.
     #[error("host address cannot be zero")]
     ZeroAddress,
 }
+/// Four-step pairing exchange: send [`Self::next_command`], pass the reply to
+/// [`Self::on_response`], and repeat until it returns `None`.
 #[derive(Debug)]
 pub struct Pairing {
     host: Address,
@@ -46,6 +54,8 @@ impl Pairing {
             stage: 0,
         })
     }
+    /// The next command to send, or `None` once pairing is complete.
+    ///
     /// # Panics
     ///
     /// Never: [`Self::new`] rejects a zero host, so `host - 1` is a valid address.
@@ -100,6 +110,8 @@ impl Pairing {
         Ok(())
     }
 }
+/// The controller's confirmation value: AES-128 of `challenge` keyed by `ltk`, with
+/// both inputs byte-reversed first.
 #[must_use]
 pub fn confirmation(mut ltk: [u8; 16], mut challenge: [u8; 16]) -> [u8; 16] {
     ltk.reverse();

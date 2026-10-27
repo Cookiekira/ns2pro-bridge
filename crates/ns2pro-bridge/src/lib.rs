@@ -9,4 +9,4 @@ mod sync;
 pub mod usb;
 
 pub mod app;
-pub mod rt;
+mod rt;

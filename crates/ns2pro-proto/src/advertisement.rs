@@ -4,6 +4,7 @@ const NINTENDO_COMPANY_ID: u16 = 0x0553;
 const NINTENDO_VID: u16 = 0x057E;
 const NS2PRO_PID: u16 = 0x2069;
 
+/// Advertising mode recognised in a controller advertisement.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdvertisementMode {
     /// Pairing or reconnect advertising.

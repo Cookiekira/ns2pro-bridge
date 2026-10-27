@@ -1,4 +1,4 @@
 #[cfg(target_os = "linux")]
-pub mod linux;
+pub(crate) mod linux;
 #[cfg(windows)]
-pub mod windows;
+pub(crate) mod windows;

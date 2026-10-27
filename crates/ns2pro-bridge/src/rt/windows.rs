@@ -12,7 +12,7 @@ use windows::{
 };
 
 #[derive(Debug)]
-pub struct RuntimeGuard {
+pub(crate) struct RuntimeGuard {
     mmcss: Option<HANDLE>,
     // Both registrations must be released on the registering runtime thread.
     _thread_bound: PhantomData<Rc<()>>,
@@ -24,7 +24,7 @@ impl RuntimeGuard {
     /// # Errors
     ///
     /// When `RoInitialize` fails.
-    pub fn new() -> windows::core::Result<Self> {
+    pub(crate) fn new() -> windows::core::Result<Self> {
         // SAFETY: balanced by Drop on this same thread; MTA permits WinRT callbacks.
         unsafe { RoInitialize(RO_INIT_MULTITHREADED)? };
         let mut task = 0;
