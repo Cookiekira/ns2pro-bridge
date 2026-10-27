@@ -1,0 +1,2 @@
+# Matches what `cargo fmt` infers from edition 2024, for editors that run rustfmt directly.
+style_edition = "2024"

@@ -1,0 +1,7 @@
+# Development and CI toolchain. Bump deliberately when a new stable release ships;
+# the `latest-stable` CI job surfaces drift. The supported minimum lives in
+# Cargo.toml `rust-version` and is tested separately by the `msrv` jobs.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
