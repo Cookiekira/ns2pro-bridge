@@ -52,7 +52,7 @@ impl Abi {
 pub enum WireError {
     /// The listener port is 0.
     ZeroPort,
-    /// The host is unspecified or too long for the request.
+    /// The host address is unspecified.
     InvalidHost,
     /// A plugin response with the wrong size or a non-positive port, or a
     /// non-positive port passed to [`plugout`].
