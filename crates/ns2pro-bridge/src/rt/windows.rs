@@ -45,12 +45,13 @@ impl RuntimeGuard {
 }
 impl Drop for RuntimeGuard {
     fn drop(&mut self) {
-        // SAFETY: handle came from AvSetMmThreadCharacteristicsW on this thread (the
-        // guard is !Send) and take() ensures it is reverted once.
-        if let Some(handle) = self.mmcss.take()
-            && let Err(error) = unsafe { AvRevertMmThreadCharacteristics(handle) }
-        {
-            tracing::debug!(%error, "MMCSS Games release failed");
+        if let Some(handle) = self.mmcss.take() {
+            // SAFETY: handle came from AvSetMmThreadCharacteristicsW on this thread (the
+            // guard is !Send) and take() ensures it is reverted once.
+            let result = unsafe { AvRevertMmThreadCharacteristics(handle) };
+            if let Err(error) = result {
+                tracing::debug!(%error, "MMCSS Games release failed");
+            }
         }
         // SAFETY: balances the successful RoInitialize in new() on the same thread.
         unsafe { RoUninitialize() };
