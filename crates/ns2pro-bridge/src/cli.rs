@@ -1,6 +1,8 @@
+//! Command-line options.
 use clap::Parser;
 use ns2pro_proto::Address;
 use std::path::PathBuf;
+/// Command-line options.
 #[derive(Clone, Debug, Parser)]
 #[expect(
     clippy::struct_excessive_bools,
@@ -36,6 +38,7 @@ pub struct Options {
     /// Log level: trace, debug, info, warn, error or off; `RUST_LOG` takes precedence
     #[arg(long, default_value = "info",value_parser=parse_level)]
     pub log_level: String,
+    /// Hidden: scan briefly to check Bluetooth access, then exit.
     #[arg(long, hide = true)]
     pub bt_smoke_test: bool,
 }

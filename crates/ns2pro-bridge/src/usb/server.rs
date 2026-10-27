@@ -1,3 +1,4 @@
+//! TCP USB/IP server exporting the virtual device as busid 1-1.
 use super::session::serve_urbs;
 use crate::channels::Channels;
 use ns2pro_usb::usbip::ManagementRequest;

@@ -6,22 +6,30 @@ use crate::{
     usb::{self, AttachError},
 };
 use tokio_util::sync::CancellationToken;
+/// Why the bridge stopped.
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
+    /// Bluetooth adapter failure.
     #[error(transparent)]
     Bluetooth(#[from] crate::ble::BleError),
+    /// Attaching the virtual USB device failed.
     #[error(transparent)]
     Attach(#[from] AttachError),
+    /// USB setup failed.
     #[error("USB setup: {0}")]
     UsbSetup(std::io::Error),
+    /// The USB transport ended.
     #[error("USB transport ended: {0}")]
     Usb(std::io::Error),
+    /// The controller session failed.
     #[error(transparent)]
     Session(#[from] session::SessionError),
+    /// Platform initialization failed.
     #[error("platform initialization: {0}")]
     Platform(String),
 }
 impl AppError {
+    /// Process exit code: 2 for USB setup and attach failures, 1 otherwise.
     #[must_use]
     pub const fn exit_code(&self) -> u8 {
         match self {
@@ -29,6 +37,7 @@ impl AppError {
             _ => 1,
         }
     }
+    /// A short remedy for the user.
     #[must_use]
     pub const fn hint(&self) -> &'static str {
         match self {

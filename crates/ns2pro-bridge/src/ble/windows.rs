@@ -90,6 +90,7 @@ fn with_buffer<T>(buffer: &IBuffer, consume: impl FnOnce(&[u8]) -> T) -> windows
     }))
 }
 
+/// Windows backend using the `WinRT` Bluetooth LE APIs.
 #[derive(Debug)]
 pub struct WindowsBluetooth {
     adapter: BluetoothAdapter,
@@ -469,6 +470,7 @@ impl Drop for Resources {
         let _ = self.device.Close();
     }
 }
+/// `WinRT` GATT link; native resources are released on close or drop.
 pub struct WindowsGattLink {
     report: ConnectionReport,
     resources: RefCell<Option<Resources>>,

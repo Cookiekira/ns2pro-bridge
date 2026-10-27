@@ -14,16 +14,22 @@ use ns2pro_proto::{
 use std::{convert::Infallible, time::Duration};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+/// Controller command, pairing or link failure.
 #[derive(Debug, thiserror::Error)]
 pub enum ControllerError {
+    /// The GATT link failed.
     #[error(transparent)]
     Link(#[from] LinkError),
+    /// A command response was malformed.
     #[error(transparent)]
     Response(#[from] command::ResponseError),
+    /// Pairing failed.
     #[error(transparent)]
     Pairing(#[from] PairingError),
+    /// Shutdown cancelled the operation.
     #[error("controller operation cancelled")]
     Cancelled,
+    /// The OS random source failed while generating pairing keys.
     #[error("random key generation: {0}")]
     Random(String),
 }
@@ -55,6 +61,7 @@ impl<'a, L: GattLink> Connection<'a, L> {
         self.link.close().await;
     }
 }
+/// Serialized command channel to one controller over a [`GattLink`].
 pub struct Controller<'a, L: GattLink> {
     link: &'a L,
     responses: mpsc::Receiver<Vec<u8>>,

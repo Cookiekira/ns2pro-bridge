@@ -8,21 +8,30 @@ use crate::{
 };
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
+/// Failure that ends a connection attempt or supervision.
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
+    /// Bluetooth failure.
     #[error(transparent)]
     Bluetooth(#[from] BleError),
+    /// Controller failure.
     #[error(transparent)]
     Controller(#[from] ControllerError),
+    /// The controller cache could not be located, read or written.
     #[error("controller cache: {0}")]
     Cache(#[from] std::io::Error),
+    /// Shutdown.
     #[error("session cancelled")]
     Cancelled,
 }
+/// How one connection attempt went.
 #[derive(Debug)]
 pub struct AttemptOutcome {
+    /// Pairing completed during this attempt.
     pub paired: bool,
+    /// The controller was initialized, paired if needed, and cached.
     pub established: bool,
+    /// How the attempt ended.
     pub result: Result<(), SessionError>,
 }
 /// One attempt owns the acquired link and always closes it, even during partial setup.

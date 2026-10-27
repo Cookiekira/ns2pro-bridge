@@ -9,6 +9,7 @@ use mgmt::Management;
 use ns2pro_proto::Address;
 use tokio::time::{Duration, timeout};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
+/// Linux backend using the kernel's management, HCI and L2CAP sockets directly.
 #[derive(Debug)]
 pub struct LinuxBluetooth {
     index: u16,

@@ -1,3 +1,4 @@
+//! Command-line behaviour of the built binary.
 use std::process::Command;
 
 #[test]
