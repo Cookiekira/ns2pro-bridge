@@ -88,7 +88,7 @@ impl Statistics {
         clippy::cast_precision_loss,
         clippy::as_conversions,
         clippy::indexing_slicing,
-        reason = "rates are approximate diagnostics (counts never approach 2^53); len <= SAMPLES"
+        reason = "rates are approximate diagnostics; len <= SAMPLES"
     )]
     pub fn log(&mut self) {
         let values = &mut self.sorted[..self.len];
@@ -96,11 +96,11 @@ impl Statistics {
         values.sort_unstable();
         let values = &*values;
         let p = |percent: usize| {
-            self.len
-                .checked_sub(1)
-                .and_then(|last| values.get(last * percent / 100))
-                .copied()
-                .unwrap_or(0)
+            if self.len == 0 {
+                0
+            } else {
+                values[(self.len - 1) * percent / 100]
+            }
         };
         let secs = self.start.elapsed().as_secs_f64().max(0.001);
         tracing::debug!(

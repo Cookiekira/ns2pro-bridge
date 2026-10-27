@@ -198,7 +198,14 @@ pub fn parse_common_report(
         let millivolts = i32::from(u16::from_le_bytes([low, high]));
         if millivolts > 0 {
             let level = ((millivolts - 3200) * 9 / 800).clamp(0, i32::from(BATTERY_MAX));
-            state.battery_level = u8::try_from(level).unwrap_or(BATTERY_MAX);
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                clippy::as_conversions,
+                reason = "clamped to 0..=BATTERY_MAX"
+            )]
+            let level = level as u8;
+            state.battery_level = level;
             state.external_power = true;
         }
     }
@@ -246,7 +253,14 @@ fn normalize_axis(value: i32, center: i32, positive_span: i32, negative_span: i3
     } else {
         mid - ((center - value) * (mid - min) + negative_span / 2) / negative_span
     };
-    u16::try_from(out.clamp(min, max)).unwrap_or(STICK_CENTER)
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::as_conversions,
+        reason = "clamped to STICK_MIN..=STICK_MAX"
+    )]
+    let out = out.clamp(min, max) as u16;
+    out
 }
 
 #[cfg(test)]

@@ -65,7 +65,7 @@ impl std::error::Error for WireError {}
 /// # Errors
 ///
 /// [`WireError::ZeroPort`] or [`WireError::InvalidHost`] for an address the
-/// driver cannot attach to or whose text does not fit the request.
+/// driver cannot attach to.
 pub fn plugin(address: SocketAddr, abi: Abi) -> Result<Vec<u8>, WireError> {
     if address.port() == 0 {
         return Err(WireError::ZeroPort);
@@ -96,10 +96,11 @@ pub fn plugin(address: SocketAddr, abi: Abi) -> Result<Vec<u8>, WireError> {
     .into_iter()
     .chain(low_latency)
     {
-        request
-            .get_mut(offset..offset + field.len())
-            .ok_or(WireError::InvalidHost)?
-            .copy_from_slice(field);
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "ABI offsets and formatted socket addresses fit every request size"
+        )]
+        request[offset..offset + field.len()].copy_from_slice(field);
     }
     Ok(request)
 }

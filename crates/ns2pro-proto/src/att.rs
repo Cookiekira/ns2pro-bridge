@@ -140,27 +140,32 @@ impl Discovery {
         self.mtu
     }
     #[must_use]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "stage indices always name an existing service and declaration"
+    )]
     pub fn request(&self) -> Option<Vec<u8>> {
         match self.stage {
             Stage::Mtu => Some(mtu_request().to_vec()),
             Stage::Services(start) => Some(range(0x10, start, 0xffff, Some(0x2800))),
             Stage::Characteristics(s, start) => {
-                Some(range(8, start, self.services.get(s)?.end, Some(0x2803)))
+                Some(range(8, start, self.services[s].end, Some(0x2803)))
             }
             Stage::Descriptors(s, c, start) => {
-                Some(range(4, start, self.descriptor_end(s, c)?, None))
+                Some(range(4, start, self.descriptor_end(s, c), None))
             }
             Stage::Done => None,
         }
     }
-    fn descriptor_end(&self, s: usize, c: usize) -> Option<u16> {
-        let service_end = self.services.get(s)?.end;
-        Some(
-            self.declarations
-                .get(s)?
-                .get(c + 1)
-                .map_or(service_end, |d| d.handle - 1),
-        )
+    /// Last handle that can belong to declaration `c`'s descriptors.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "stage indices always name an existing service and declaration"
+    )]
+    fn descriptor_end(&self, s: usize, c: usize) -> u16 {
+        self.declarations[s]
+            .get(c + 1)
+            .map_or(self.services[s].end, |d| d.handle - 1)
     }
     fn next_service(&mut self, s: usize) {
         self.stage = self.services.get(s).map_or(Stage::Done, |service| {
@@ -176,7 +181,7 @@ impl Discovery {
             while let Some(d) = declarations.get(c) {
                 if d.kind
                     .is_some_and(|k| Characteristic::NOTIFYING.contains(&k))
-                    && self.descriptor_end(s, c).is_some_and(|end| d.value < end)
+                    && d.value < self.descriptor_end(s, c)
                 {
                     let first = d.value + 1;
                     self.stage = Stage::Descriptors(s, c, first);
@@ -269,10 +274,14 @@ impl Discovery {
         }
         Ok(())
     }
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "stage indices always name an existing service and declaration"
+    )]
     fn on_characteristics(&mut self, p: &[u8], s: usize, start: u16) -> Result<(), AttError> {
         let (size, entries) = entries(p, &[7, 21])?;
-        let service_end = self.services.get(s).ok_or(AttError::Malformed)?.end;
-        let declarations = self.declarations.get_mut(s).ok_or(AttError::Malformed)?;
+        let service_end = self.services[s].end;
+        let declarations = &mut self.declarations[s];
         let mut next = start;
         for e in entries.chunks_exact(size) {
             let handle = word(e, 0)?;
@@ -305,6 +314,10 @@ impl Discovery {
         }
         Ok(())
     }
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "stage indices always name an existing service and declaration"
+    )]
     fn on_descriptors(&mut self, p: &[u8], s: usize, c: usize, start: u16) -> Result<(), AttError> {
         // Find Information format 1 has 16-bit UUIDs, format 2 has 128-bit UUIDs.
         let (size, entries) = match p.get(1) {
@@ -312,12 +325,8 @@ impl Discovery {
             Some(2) => entries_of(p, 18)?,
             _ => return Err(AttError::Malformed),
         };
-        let end = self.descriptor_end(s, c).ok_or(AttError::Malformed)?;
-        let declaration = self
-            .declarations
-            .get_mut(s)
-            .and_then(|declarations| declarations.get_mut(c))
-            .ok_or(AttError::Malformed)?;
+        let end = self.descriptor_end(s, c);
+        let declaration = &mut self.declarations[s][c];
         let mut last = 0;
         for e in entries.chunks_exact(size) {
             let handle = word(e, 0)?;

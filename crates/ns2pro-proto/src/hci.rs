@@ -108,22 +108,30 @@ fn le_meta(subevent: u8, params: &[u8]) -> io::Result<Event<'_>> {
                 0x0a => (31, 24),
                 _ => (34, 24),
             };
-            let short = || io::Error::other("short LE connection event");
             if params.len() < minimum {
-                return Err(short());
+                return Err(io::Error::other("short LE connection event"));
             }
-            let &[_, status, h0, h1, role, address_type, ref rest @ ..] = params else {
-                return Err(short());
-            };
+            #[expect(
+                clippy::indexing_slicing,
+                reason = "every minimum covers the identity prefix and offset + 6"
+            )]
+            let (status, handle, role, address_type, address, parameters) = (
+                params[1],
+                u16::from_le_bytes([params[2], params[3]]),
+                params[4],
+                params[5],
+                &params[6..12],
+                &params[offset..offset + 6],
+            );
             if status != 0 {
                 return Ok(Event::Other);
             }
             Event::Connected {
-                handle: u16::from_le_bytes([h0, h1]),
+                handle,
                 role,
                 address_type,
-                address: rest.get(..6).ok_or_else(short)?,
-                parameters: Parameters::parse(params.get(offset..offset + 6).ok_or_else(short)?)?,
+                address,
+                parameters: Parameters::parse(parameters)?,
             }
         }
         3 => {

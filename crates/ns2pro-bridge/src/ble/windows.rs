@@ -66,8 +66,11 @@ macro_rules! winrt {
 /// Borrows the buffer only during `consume`. The COM buffer and byte-access
 /// interface remain alive for the entire slice lifetime, with no intermediate copy.
 fn with_buffer<T>(buffer: &IBuffer, consume: impl FnOnce(&[u8]) -> T) -> windows::core::Result<T> {
-    let length = usize::try_from(buffer.Length()?)
-        .map_err(|_| windows::core::Error::from_hresult(windows::Win32::Foundation::E_BOUNDS))?;
+    #[expect(
+        clippy::as_conversions,
+        reason = "u32 widens losslessly to usize on Windows targets"
+    )]
+    let length = buffer.Length()? as usize;
     if length == 0 {
         return Ok(consume(&[]));
     }

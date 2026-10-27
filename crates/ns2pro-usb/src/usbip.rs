@@ -38,7 +38,7 @@ impl Urb {
             s1,
         ] = words
         else {
-            return Err(UsbipError("short header"));
+            unreachable!("48 bytes are 12 words");
         };
         let word = u32::from_be_bytes;
         let command = word(command);

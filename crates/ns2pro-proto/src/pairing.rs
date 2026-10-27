@@ -46,13 +46,18 @@ impl Pairing {
             stage: 0,
         })
     }
+    /// # Panics
+    ///
+    /// Never: [`Self::new`] rejects a zero host, so `host - 1` is a valid address.
     #[must_use]
+    #[expect(clippy::expect_used, reason = "the host is nonzero by construction")]
     pub fn next_command(&self) -> Option<Vec<u8>> {
         let (sub, payload) = match self.stage {
             0 => {
                 let mut p = vec![0, 2];
                 p.extend(self.host.to_le_bytes());
-                p.extend(Address::new(self.host.value() - 1)?.to_le_bytes());
+                let previous = Address::new(self.host.value() - 1).expect("nonzero host");
+                p.extend(previous.to_le_bytes());
                 (1, p)
             }
             1 => (4, [&[0][..], &self.key].concat()),

@@ -203,34 +203,30 @@ impl AdapterInfo {
 ///
 /// [`Malformed`] unless `p` is exactly 280 bytes.
 pub fn adapter_info(p: &[u8]) -> Result<AdapterInfo, Malformed> {
-    if p.len() != 280 {
-        return Err(Malformed);
-    }
-    // Address (LE), version, manufacturer, supported and current settings.
-    let Some(
-        &[
-            a0,
-            a1,
-            a2,
-            a3,
-            a4,
-            a5,
-            _,
-            _,
-            _,
-            s0,
-            s1,
-            s2,
-            s3,
-            c0,
-            c1,
-            c2,
-            c3,
-        ],
-    ) = p.first_chunk::<17>()
-    else {
+    let Ok(p) = <&[u8; 280]>::try_from(p) else {
         return Err(Malformed);
     };
+    // Address (LE), version, manufacturer, supported and current settings.
+    let &[
+        a0,
+        a1,
+        a2,
+        a3,
+        a4,
+        a5,
+        _,
+        _,
+        _,
+        s0,
+        s1,
+        s2,
+        s3,
+        c0,
+        c1,
+        c2,
+        c3,
+        ..,
+    ] = p;
     Ok(AdapterInfo {
         address: Address::from_be_bytes([a5, a4, a3, a2, a1, a0]),
         supported: u32::from_le_bytes([s0, s1, s2, s3]),
