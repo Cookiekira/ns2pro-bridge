@@ -124,7 +124,7 @@ impl Management {
         };
         let result = tokio::select! {
             biased;
-            _ = cancel.cancelled() => Err(BleError::Cancelled),
+            () = cancel.cancelled() => Err(BleError::Cancelled),
             result = timeout(duration, async {
                 loop {
                     let p = if let Some(p) = m.events.pop_front() {
@@ -211,7 +211,7 @@ mod tests {
         p.push(200);
         p.extend([0; 4]);
         let ad = [13, 0xff, 0x53, 5, 0, 0, 0, 0x7e, 5, 0x69, 0x20, 0, 0, 0x81];
-        p.extend((ad.len() as u16).to_le_bytes());
+        p.extend(u16::try_from(ad.len()).unwrap().to_le_bytes());
         p.extend(ad);
         peer.send(&mgmt::command(mgmt::DEVICE_FOUND, 0, &p).unwrap())
             .await

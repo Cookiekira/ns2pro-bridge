@@ -11,7 +11,8 @@ pub enum Identity {
     Resolved(Option<[u8; 64]>),
 }
 impl Identity {
-    pub fn block(self) -> Option<[u8; 64]> {
+    #[must_use]
+    pub const fn block(self) -> Option<[u8; 64]> {
         match self {
             Self::Pending => None,
             Self::Resolved(block) => block,
@@ -55,7 +56,7 @@ impl Channels {
     }
     pub fn neutral(&self) {
         self.input.send_modify(|s| {
-            s.state = Default::default();
+            s.state = ns2pro_proto::InputState::default();
             s.seq = s.seq.wrapping_add(1);
             s.motion_timestamp_us = 0;
         });

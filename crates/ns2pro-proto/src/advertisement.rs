@@ -16,6 +16,7 @@ pub enum AdvertisementMode {
 }
 
 /// Parses one manufacturer-specific data entry.
+#[must_use]
 pub fn parse(company_id: u16, data: &[u8]) -> Option<AdvertisementMode> {
     if company_id != NINTENDO_COMPANY_ID || data.len() <= MODE_OFFSET {
         return None;

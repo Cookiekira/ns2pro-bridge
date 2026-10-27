@@ -13,30 +13,51 @@ pub enum Error {
 }
 #[derive(Debug)]
 pub struct Attachment {
-    listener: Option<TcpListener>,
-    auto_attach: bool,
+    mode: Mode,
+}
+#[derive(Debug)]
+enum Mode {
+    /// Serve TCP USB/IP for manual or remote clients without attaching.
+    Manual(TcpListener),
+    #[cfg(target_os = "linux")]
+    Vhci,
+    /// usbip-win2 imports from this bridge's own TCP listener.
+    #[cfg(windows)]
+    UsbipWin(TcpListener),
+}
+async fn listen(address: &str) -> Result<TcpListener, Error> {
+    let listener = TcpListener::bind(address).await.map_err(Error::Setup)?;
+    let address = listener.local_addr().map_err(Error::Setup)?;
+    tracing::info!(%address,"USB/IP server listening (busid 1-1)");
+    Ok(listener)
 }
 impl Attachment {
+    /// Binds the USB/IP listener when one is needed, or loads `vhci-hcd` for
+    /// automatic attachment on Linux.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Setup`] when the listener cannot bind or the driver cannot load.
     pub async fn prepare(options: &Options) -> Result<Self, Error> {
-        let listener = if cfg!(windows) || options.no_auto_attach {
-            let listener = TcpListener::bind(&options.usb_addr)
-                .await
-                .map_err(Error::Setup)?;
-            let address = listener.local_addr().map_err(Error::Setup)?;
-            tracing::info!(%address,"USB/IP server listening (busid 1-1)");
-            Some(listener)
+        let mode = if options.no_auto_attach {
+            Mode::Manual(listen(&options.usb_addr).await?)
         } else {
             #[cfg(target_os = "linux")]
-            super::vhci::ensure_loaded().map_err(Error::Setup)?;
-            None
+            {
+                super::vhci::ensure_loaded().map_err(Error::Setup)?;
+                Mode::Vhci
+            }
+            #[cfg(windows)]
+            Mode::UsbipWin(listen(&options.usb_addr).await?)
         };
-        Ok(Self {
-            listener,
-            auto_attach: !options.no_auto_attach,
-        })
+        Ok(Self { mode })
     }
 
     /// Cancel and drain application work before releasing the native lease.
+    ///
+    /// # Errors
+    ///
+    /// The first transport or attachment failure, or the error returned by `drain`.
     pub async fn run<E: From<Error>>(
         self,
         channels: &Channels,
@@ -48,28 +69,25 @@ impl Attachment {
             cancel.cancel();
             result
         };
-        if !self.auto_attach {
-            let transport = async {
-                let result = server::serve(
-                    self.listener.as_ref().expect("manual USB listener"),
-                    channels.clone(),
-                    cancel.clone(),
-                )
-                .await;
-                cancel.cancel();
-                result.map_err(Error::Transport)
-            };
-            let (transport, drained) = tokio::join!(transport, drain);
-            transport?;
-            return drained;
+        match self.mode {
+            Mode::Manual(listener) => {
+                let transport = async {
+                    let result = server::serve(&listener, channels.clone(), cancel.clone()).await;
+                    cancel.cancel();
+                    result.map_err(Error::Transport)
+                };
+                let (transport, drained) = tokio::join!(transport, drain);
+                transport?;
+                drained
+            }
+            #[cfg(target_os = "linux")]
+            Mode::Vhci => run_attached(super::vhci::Adapter, channels, cancel, drain).await,
+            #[cfg(windows)]
+            Mode::UsbipWin(listener) => {
+                let adapter = super::usbip_win::Adapter { listener };
+                run_attached(adapter, channels, cancel, drain).await
+            }
         }
-        #[cfg(target_os = "linux")]
-        let adapter = super::vhci::Adapter;
-        #[cfg(windows)]
-        let adapter = super::usbip_win::Adapter {
-            listener: self.listener.expect("Windows USB listener"),
-        };
-        run_attached(adapter, channels, cancel, drain).await
     }
 }
 
@@ -171,7 +189,7 @@ async fn wait_for_identity(channels: &Channels, cancel: &CancellationToken) -> b
         }
         tokio::select! {
             biased;
-            _ = cancel.cancelled() => return false,
+            () = cancel.cancelled() => return false,
             changed = identity.changed() => {
                 if changed.is_err() {
                     return false;
@@ -252,7 +270,7 @@ mod tests {
                 None => std::future::pending().await,
             }
         }
-        async fn detach(&self, _: &mut ()) -> Result<(), AttachError> {
+        async fn detach(&self, (): &mut ()) -> Result<(), AttachError> {
             self.events.push("detach");
             Ok(())
         }
@@ -358,7 +376,7 @@ mod tests {
             drop(peer);
             tokio::select! {
                 _ = &mut run => panic!("attachment finished before application drain"),
-                _ = draining.cancelled() => {},
+                () = draining.cancelled() => {},
             }
             assert!(futures::poll!(&mut run).is_pending());
             events.assert(&["attach", "lease", "draining"]);
@@ -420,7 +438,10 @@ mod tests {
                     "127.0.0.1:0",
                 ]);
                 let usb = Attachment::prepare(&options).await.unwrap();
-                let address = usb.listener.as_ref().unwrap().local_addr().unwrap();
+                let Mode::Manual(listener) = &usb.mode else {
+                    panic!("--no-auto-attach must select manual serving");
+                };
+                let address = listener.local_addr().unwrap();
                 let channels = Channels::default();
                 let cancel = CancellationToken::new();
                 let clients = async {

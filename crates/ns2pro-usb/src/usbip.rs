@@ -15,12 +15,22 @@ pub struct Urb {
     pub unlink_seq: u32,
 }
 impl Urb {
+    /// Decodes a `USBIP_CMD_SUBMIT` or `USBIP_CMD_UNLINK` header.
+    ///
+    /// # Errors
+    ///
+    /// For other commands, oversize transfers, invalid endpoints and
+    /// isochronous submissions.
     pub fn decode(h: &[u8; 48]) -> Result<Self, UsbipError> {
-        let get = |i| u32::from_be_bytes(h[i..i + 4].try_into().unwrap());
+        let get = |i: usize| u32::from_be_bytes([h[i], h[i + 1], h[i + 2], h[i + 3]]);
         if ![1, 2].contains(&get(0)) {
             return Err(UsbipError("unsupported command"));
         }
-        let length = if get(0) == 1 { get(24) as usize } else { 0 };
+        let length = if get(0) == 1 {
+            usize::try_from(get(24)).unwrap_or(usize::MAX)
+        } else {
+            0
+        };
         if length > MAX_TRANSFER || get(12) > 1 || get(16) > 15 || (get(0) == 1 && get(32) != 0) {
             return Err(UsbipError(
                 "invalid length, endpoint or isochronous request",
@@ -33,10 +43,11 @@ impl Urb {
             direction: get(12),
             ep: get(16),
             length,
-            setup: h[40..48].try_into().unwrap(),
+            setup: std::array::from_fn(|i| h[40 + i]),
             unlink_seq: get(20),
         })
     }
+    #[must_use]
     pub fn header(self) -> [u8; 48] {
         let mut h = [0; 48];
         for (i, v) in [
@@ -45,7 +56,7 @@ impl Urb {
             (8, self.devid),
             (12, self.direction),
             (16, self.ep),
-            (24, self.length as u32),
+            (24, wire_length(self.length)),
         ] {
             h[i..i + 4].copy_from_slice(&v.to_be_bytes());
         }
@@ -55,6 +66,14 @@ impl Urb {
         }
         h
     }
+}
+/// USB/IP length fields carry the low 32 bits of a length.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the wire field is 32 bits; decode bounds lengths by MAX_TRANSFER"
+)]
+const fn wire_length(length: usize) -> u32 {
+    length as u32
 }
 pub fn reply_into(out: &mut Vec<u8>, urb: Urb, status: i32, payload: &[u8], actual: usize) {
     let start = out.len();
@@ -66,12 +85,12 @@ pub fn reply_into(out: &mut Vec<u8>, urb: Urb, status: i32, payload: &[u8], actu
         (8, urb.devid),
         (12, urb.direction),
         (16, urb.ep),
-        (20, status as u32),
+        (20, status.cast_unsigned()),
     ] {
         h[i..i + 4].copy_from_slice(&v.to_be_bytes());
     }
     if urb.command == 1 {
-        h[24..28].copy_from_slice(&(actual as u32).to_be_bytes());
+        h[24..28].copy_from_slice(&wire_length(actual).to_be_bytes());
     }
     out.extend_from_slice(payload);
 }
@@ -83,21 +102,26 @@ pub struct ManagementRequest {
     valid: bool,
 }
 impl ManagementRequest {
+    #[must_use]
     pub fn parse(header: &[u8; 8]) -> Self {
         Self {
             op: u16::from_be_bytes([header[2], header[3]]),
             valid: header[..2] == [1, 0x11] && header[4..] == [0; 4],
         }
     }
-    pub fn is_import(self) -> bool {
+    #[must_use]
+    pub const fn is_import(self) -> bool {
         self.op == 0x8003
     }
+    #[must_use]
     pub fn valid_busid(self, busid: &[u8; 32]) -> bool {
         self.valid && busid[..3] == *b"1-1" && busid[3..].iter().all(|b| *b == 0)
     }
-    pub fn keep_open(self) -> bool {
+    #[must_use]
+    pub const fn keep_open(self) -> bool {
         self.valid && self.op == 0x8005
     }
+    #[must_use]
     pub fn reply(self, busid: Option<&[u8; 32]>) -> Vec<u8> {
         let valid = match self.op {
             0x8005 => self.valid,
@@ -108,17 +132,10 @@ impl ManagementRequest {
     }
 }
 /// Fixed single-device export. Descriptors and interface classes match VIIPER.
+#[must_use]
 pub fn management_reply(op: u16, valid: bool) -> Vec<u8> {
-    let mut b = vec![
-        1,
-        0x11,
-        (op >> 8) as u8,
-        op as u8,
-        0,
-        0,
-        0,
-        u8::from(!valid),
-    ];
+    let [op_hi, op_lo] = op.to_be_bytes();
+    let mut b = vec![1, 0x11, op_hi, op_lo, 0, 0, 0, u8::from(!valid)];
     if !valid {
         return b;
     }
@@ -143,6 +160,25 @@ pub fn management_reply(op: u16, valid: bool) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn oversized_lengths_keep_their_low_32_bits() {
+        let urb = Urb {
+            command: 1,
+            seq: 0,
+            devid: 0,
+            direction: 0,
+            ep: 0,
+            length: 0x1_0000_0005,
+            setup: [0; 8],
+            unlink_seq: 0,
+        };
+        assert_eq!(urb.header()[24..28], 5u32.to_be_bytes());
+        let mut out = Vec::new();
+        reply_into(&mut out, urb, 0, &[], 0x1_0000_0007);
+        assert_eq!(out[24..28], 7u32.to_be_bytes());
+    }
 
     #[test]
     fn management_headers_and_import_busids_preserve_reply_contract() {

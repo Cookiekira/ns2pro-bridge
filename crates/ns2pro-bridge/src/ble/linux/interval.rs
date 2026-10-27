@@ -166,7 +166,7 @@ impl Observer {
     }
 }
 
-pub(super) fn unavailable() -> ConnectionReport {
+pub(super) const fn unavailable() -> ConnectionReport {
     ConnectionReport {
         target: ConnectionTarget::Interval(LOW_LATENCY.min),
         preference: PreferenceOutcome::Unavailable,
@@ -174,7 +174,7 @@ pub(super) fn unavailable() -> ConnectionReport {
     }
 }
 
-fn observed(report: &mut ConnectionReport, parameters: Parameters) {
+const fn observed(report: &mut ConnectionReport, parameters: Parameters) {
     report.observed_interval = Some(parameters.interval);
     report.preference = if parameters.interval == LOW_LATENCY.min {
         PreferenceOutcome::Confirmed

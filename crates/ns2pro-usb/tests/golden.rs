@@ -27,21 +27,23 @@ fn control_fixtures() {
         }
     }
 }
+fn field<T: TryFrom<i64, Error: std::fmt::Debug>>(s: &Value, key: &str) -> T {
+    T::try_from(s[key].as_i64().unwrap()).unwrap()
+}
 fn state(s: &Value) -> ns2pro_proto::InputState {
-    let n = |key: &str| s[key].as_i64().unwrap();
     ns2pro_proto::InputState {
-        buttons: Buttons(n("Buttons") as u32),
+        buttons: Buttons(field(s, "Buttons")),
         left_stick: Stick {
-            x: n("LX") as u16,
-            y: n("LY") as u16,
+            x: field(s, "LX"),
+            y: field(s, "LY"),
         },
         right_stick: Stick {
-            x: n("RX") as u16,
-            y: n("RY") as u16,
+            x: field(s, "RX"),
+            y: field(s, "RY"),
         },
-        accel: [n("AccelX") as i16, n("AccelY") as i16, n("AccelZ") as i16],
-        gyro: [n("GyroX") as i16, n("GyroY") as i16, n("GyroZ") as i16],
-        battery_level: n("BatteryLevel") as u8,
+        accel: [field(s, "AccelX"), field(s, "AccelY"), field(s, "AccelZ")],
+        gyro: [field(s, "GyroX"), field(s, "GyroY"), field(s, "GyroZ")],
+        battery_level: field(s, "BatteryLevel"),
         charging: s["Charging"].as_bool().unwrap(),
         external_power: s["ExternalPower"].as_bool().unwrap(),
     }
@@ -80,7 +82,7 @@ fn all_scenario_fixtures() {
                 }
                 "in" => Some(if step["ep"] == 1 {
                     if imu {
-                        timestamp += 4000
+                        timestamp += 4000;
                     }
                     sample.motion_timestamp_us = timestamp;
                     d.interrupt_in(&sample).to_vec()
@@ -122,7 +124,7 @@ fn all_scenario_fixtures() {
                 let expected = &expected[0];
                 match output.unwrap() {
                     Output::PlayerLeds(v) => {
-                        assert_eq!(u64::from(v), expected["leds"].as_u64().unwrap())
+                        assert_eq!(u64::from(v), expected["leds"].as_u64().unwrap());
                     }
                     Output::Rumble { left, right } => {
                         assert_eq!(left.as_slice(), hex(&expected["left"]));
@@ -130,7 +132,7 @@ fn all_scenario_fixtures() {
                     }
                 }
             } else {
-                assert!(output.is_none(), "unexpected output {step}")
+                assert!(output.is_none(), "unexpected output {step}");
             }
         }
     }

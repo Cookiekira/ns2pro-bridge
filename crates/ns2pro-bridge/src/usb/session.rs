@@ -22,6 +22,15 @@ async fn read_urb<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<(Urb, Vec<
     reader.read_exact(&mut data).await?;
     Ok((u, data))
 }
+/// Serves URBs for one imported device until the peer disconnects or `cancel` fires.
+///
+/// # Errors
+///
+/// When reading or writing the USB/IP stream fails or a header is invalid.
+///
+/// # Panics
+///
+/// If the statistics mutex is poisoned. The URB frame stream itself never ends.
 pub async fn serve_urbs<S: AsyncRead + AsyncWrite + Unpin>(
     stream: S,
     channels: Channels,
@@ -35,7 +44,7 @@ pub async fn serve_urbs<S: AsyncRead + AsyncWrite + Unpin>(
         .device
         .set_identity(identity.borrow_and_update().block());
     let origin = tokio::time::Instant::now();
-    let now = || origin.elapsed().as_micros() as u64;
+    let now = || u64::try_from(origin.elapsed().as_micros()).unwrap_or(u64::MAX);
     let mut effects = Effects {
         replies: Vec::with_capacity(4096),
         outputs: Vec::with_capacity(8),
@@ -59,7 +68,7 @@ pub async fn serve_urbs<S: AsyncRead + AsyncWrite + Unpin>(
         };
         tokio::select! {
             biased;
-            _ = cancel.cancelled() => return Ok(()),
+            () = cancel.cancelled() => return Ok(()),
             changed = identity.changed() => {
                 if changed.is_err() {
                     return Ok(());
@@ -76,12 +85,12 @@ pub async fn serve_urbs<S: AsyncRead + AsyncWrite + Unpin>(
                 let (u, data) = frame.expect("URB stream is infinite")?;
                 engine.submit(u, &data, now(), &mut effects);
             }
-            _ = timer => engine.on_keepalive_due(now(), &mut effects),
+            () = timer => engine.on_keepalive_due(now(), &mut effects),
         }
         // ACK accepted OUT before waking controller output work. write_all handles short writes.
         if !effects.replies.is_empty() {
             tokio::select! {
-                _ = cancel.cancelled() => return Ok(()),
+                () = cancel.cancelled() => return Ok(()),
                 result = writer.write_all(&effects.replies) => result?,
             }
             effects.replies.clear();
@@ -94,7 +103,7 @@ pub async fn serve_urbs<S: AsyncRead + AsyncWrite + Unpin>(
                 .completion(seq, completions, keepalives);
         }
         for output in effects.outputs.drain(..) {
-            channels.output(output)
+            channels.output(output);
         }
     }
 }

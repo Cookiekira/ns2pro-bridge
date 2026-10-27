@@ -53,7 +53,7 @@ impl UrbEngine {
             (_, 0) => match self.device.control(u.setup, data, &self.sample) {
                 Ok((p, o)) => {
                     payload = p;
-                    output = o
+                    output = o;
                 }
                 Err(s) => status = s,
             },
@@ -68,7 +68,7 @@ impl UrbEngine {
             }
             (1, 2) => {
                 if let Some(p) = self.device.read_bulk_in(u.length) {
-                    payload = p
+                    payload = p;
                 } else {
                     if self.pending.len() >= 256 {
                         reply_into(&mut e.replies, u, -12, &[], 0);
@@ -98,7 +98,7 @@ impl UrbEngine {
             actual,
         );
         if let Some(o) = output {
-            e.outputs.push(o)
+            e.outputs.push(o);
         }
         self.drain(now, false, e);
     }
@@ -120,6 +120,7 @@ impl UrbEngine {
         self.dirty = true;
         self.drain(now, false, e);
     }
+    #[must_use]
     pub fn next_keepalive_at(&self) -> Option<u64> {
         self.pending
             .iter()
@@ -132,11 +133,11 @@ impl UrbEngine {
     fn drain(&mut self, now: u64, keepalive: bool, e: &mut Effects) {
         let mut i = 0;
         while i < self.pending.len() {
-            let u = self.pending[i];
-            if u.ep == 1
+            let urb = self.pending[i];
+            if urb.ep == 1
                 && (self.dirty || (keepalive && now >= self.last_report.saturating_add(4000)))
             {
-                let p = self.device.interrupt_in(&self.sample);
+                let report = self.device.interrupt_in(&self.sample);
                 if !self.dirty {
                     e.keepalives += 1;
                 }
@@ -145,12 +146,12 @@ impl UrbEngine {
                 e.input_completions += 1;
                 e.completed_sample_seq = Some(self.sample.seq);
                 self.pending.remove(i);
-                let n = u.length.min(p.len());
-                reply_into(&mut e.replies, u, 0, &p[..n], n);
-            } else if u.ep == 2 {
-                if let Some(p) = self.device.read_bulk_in(u.length) {
+                let actual = urb.length.min(report.len());
+                reply_into(&mut e.replies, urb, 0, &report[..actual], actual);
+            } else if urb.ep == 2 {
+                if let Some(data) = self.device.read_bulk_in(urb.length) {
                     self.pending.remove(i);
-                    reply_into(&mut e.replies, u, 0, &p, p.len());
+                    reply_into(&mut e.replies, urb, 0, &data, data.len());
                 } else {
                     i += 1;
                 }

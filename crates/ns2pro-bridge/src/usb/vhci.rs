@@ -9,6 +9,11 @@ use tokio::net::{TcpListener, TcpStream, UnixStream};
 use tokio_util::either::Either;
 const ROOT: &str = "/sys/devices/platform/vhci_hcd.0";
 const DEVICE_ID: u32 = 0x10001;
+/// Loads `vhci-hcd` with modprobe unless its sysfs root already exists.
+///
+/// # Errors
+///
+/// When modprobe cannot run or exits unsuccessfully.
 pub fn ensure_loaded() -> io::Result<()> {
     if !Path::new(ROOT).exists() {
         let status = std::process::Command::new("modprobe")
@@ -24,7 +29,7 @@ pub fn ensure_loaded() -> io::Result<()> {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Port {
-    port: u32,
+    number: u32,
     status: u32,
     device: u32,
     fd: u32,
@@ -48,7 +53,7 @@ fn ports(text: &str) -> Result<Vec<Port>, AttachError> {
                         .map_err(|_| AttachError::Platform("invalid vhci status integer".into()))
                 };
                 Ok(Port {
-                    port: decimal(1)?,
+                    number: decimal(1)?,
                     status: decimal(2)?,
                     device: u32::from_str_radix(fields[4], 16)
                         .map_err(|_| AttachError::Platform("invalid vhci device id".into()))?,
@@ -72,7 +77,7 @@ fn status_files(root: &Path) -> Result<Vec<PathBuf>, AttachError> {
                 || n.strip_prefix("status.")
                     .is_some_and(|s| s.parse::<u32>().is_ok())
         }) {
-            paths.push(path)
+            paths.push(path);
         }
     }
     paths.sort();
@@ -83,7 +88,7 @@ fn free_ports(root: &Path) -> Result<Vec<(PathBuf, Port)>, AttachError> {
     for path in status_files(root)? {
         for port in ports(&fs::read_to_string(&path)?)? {
             if port.status == 4 {
-                result.push((path.clone(), port))
+                result.push((path.clone(), port));
             }
         }
     }
@@ -96,9 +101,14 @@ pub struct Attached {
     status: PathBuf,
     port: u32,
     fd: u32,
-    attached: bool,
+    active: bool,
 }
 impl Attached {
+    /// Attaches the device to a free vhci port and returns the bridge-side stream.
+    ///
+    /// # Errors
+    ///
+    /// When no free port exists, sysfs attach fails, or every port is claimed concurrently.
     pub async fn attach() -> Result<(Self, Either<UnixStream, TcpStream>), AttachError> {
         Self::attach_at(Path::new(ROOT)).await
     }
@@ -113,7 +123,7 @@ impl Attached {
             let (kernel, bridge) = std::os::unix::net::UnixStream::pair()?;
             bridge.set_nonblocking(true)?;
             let fd = kernel.as_raw_fd();
-            let (fd, stream) = match write_attach(root, port.port, fd) {
+            let (fd, stream) = match write_attach(root, port.number, fd) {
                 Ok(()) => {
                     drop(kernel);
                     (fd, Either::Left(bridge))
@@ -130,7 +140,7 @@ impl Attached {
                     client.set_nodelay(true)?;
                     server.set_nodelay(true)?;
                     let fd = client.as_raw_fd();
-                    if let Err(e) = write_attach(root, port.port, fd) {
+                    if let Err(e) = write_attach(root, port.number, fd) {
                         if e.raw_os_error() == Some(libc::EBUSY) {
                             continue;
                         }
@@ -144,9 +154,9 @@ impl Attached {
             let lease = Self {
                 root: root.into(),
                 status,
-                port: port.port,
-                fd: fd as _,
-                attached: true,
+                port: port.number,
+                fd: fd.cast_unsigned(),
+                active: true,
             };
             let stream = match stream {
                 Either::Left(bridge) => Either::Left(UnixStream::from_std(bridge)?),
@@ -158,18 +168,23 @@ impl Attached {
             "vhci ports were claimed concurrently; retry attach".into(),
         ))
     }
-    pub fn port(&self) -> u32 {
+    #[must_use]
+    pub const fn port(&self) -> u32 {
         self.port
     }
     /// Idempotent. A used port must still match the device/fd attached here.
     /// During enumeration (status 5), vhci hides that identity; detach the owned port.
+    ///
+    /// # Errors
+    ///
+    /// When the vhci status cannot be read or parsed, or the detach write fails.
     pub fn detach(&mut self) -> Result<(), AttachError> {
-        if !self.attached {
+        if !self.active {
             return Ok(());
         }
         let current = ports(&fs::read_to_string(&self.status)?)?
             .into_iter()
-            .find(|p| p.port == self.port);
+            .find(|p| p.number == self.port);
         match current {
             Some(p)
                 if p.status == 5 || (p.status == 6 && p.fd == self.fd && p.device == DEVICE_ID) =>
@@ -182,7 +197,7 @@ impl Attached {
                 tracing::debug!(port = self.port, "vhci port no longer owned; skip detach");
             }
         }
-        self.attached = false;
+        self.active = false;
         Ok(())
     }
 }
@@ -230,7 +245,7 @@ fn fallback_error(e: &io::Error) -> bool {
         Some(libc::EINVAL | libc::EPROTOTYPE | libc::EOPNOTSUPP | libc::EAFNOSUPPORT)
     )
 }
-fn attach_hint(e: io::Error) -> AttachError {
+fn attach_hint(e: impl std::fmt::Display) -> AttachError {
     AttachError::Platform(format!(
         "vhci sysfs attach failed: {e}; auto-attach needs root and vhci-hcd, or use --no-auto-attach"
     ))

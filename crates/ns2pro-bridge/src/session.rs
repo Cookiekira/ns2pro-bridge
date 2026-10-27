@@ -44,7 +44,7 @@ pub async fn attempt<B: Bluetooth>(
             Ok::<_, SessionError>((target, link))
         };
         let (target, link) = tokio::select! {
-            _ = cancel.cancelled() => Err(SessionError::Cancelled),
+            () = cancel.cancelled() => Err(SessionError::Cancelled),
             result = acquire => result,
         }?;
         let connection = Connection::new(link, channels);
@@ -72,7 +72,7 @@ pub async fn attempt<B: Bluetooth>(
             Ok::<(), SessionError>(())
         };
         let result = tokio::select! {
-            _ = cancel.cancelled() => Err(SessionError::Cancelled),
+            () = cancel.cancelled() => Err(SessionError::Cancelled),
             result = setup => result,
         };
         connection.disconnect().await;
@@ -86,6 +86,12 @@ pub async fn attempt<B: Bluetooth>(
         result,
     }
 }
+/// Connects, pairs when requested and reconnects until cancelled.
+///
+/// # Errors
+///
+/// [`SessionError::Cancelled`] on shutdown, or the first non-retryable
+/// Bluetooth, controller or cache failure.
 pub async fn supervise<B: Bluetooth>(
     bluetooth: &B,
     options: &Options,
@@ -122,8 +128,8 @@ pub async fn supervise<B: Bluetooth>(
             Duration::from_millis((base * 1000 + u64::from(random[0]) * base).min(10000))
         };
         tokio::select! {
-            _ = cancel.cancelled() => return Ok(()),
-            _ = tokio::time::sleep(delay) => {}
+            () = cancel.cancelled() => return Ok(()),
+            () = tokio::time::sleep(delay) => {}
         }
     }
 }

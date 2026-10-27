@@ -1,5 +1,8 @@
 //! Primary boundary: real controller/session/device over fake GATT and a byte peer.
-#[allow(dead_code)]
+#[expect(
+    dead_code,
+    reason = "each test binary uses a different subset of the shared fakes"
+)]
 #[path = "support/fake.rs"]
 mod fake;
 use fake::{FakeController, FakeOptions, TestCache};
@@ -10,7 +13,8 @@ use ns2pro_bridge::{
     usb::session::serve_urbs,
 };
 use ns2pro_proto::{
-    Address, calibration::Calibration, command, gatt::Characteristic, input::pack_stick12,
+    Address, Buttons, InputState, calibration::Calibration, command, gatt::Characteristic,
+    input::pack_stick12,
 };
 use ns2pro_usb::usbip::Urb;
 use tokio::{
@@ -18,7 +22,7 @@ use tokio::{
     time::{Duration, Instant},
 };
 use tokio_util::sync::CancellationToken;
-fn urb(seq: u32, dir: u32, ep: u32, len: usize) -> Urb {
+const fn urb(seq: u32, dir: u32, ep: u32, len: usize) -> Urb {
     Urb {
         command: 1,
         seq,
@@ -77,7 +81,7 @@ async fn read_usb_identity(peer: &mut DuplexStream) -> [u8; 64] {
 async fn controller_identity_reaches_usb_at_start_and_after_changes() {
     for initialize_first in [false, true] {
         let link = FakeController::default();
-        let distinctive = std::array::from_fn(|i| (i as u8).wrapping_mul(7));
+        let distinctive = std::array::from_fn(|i| u8::try_from(i).unwrap().wrapping_mul(7));
         link.configure(|o| o.identity = Some(distinctive));
         let channels = Channels::default();
         let mut controller = Controller::new(&link).await.unwrap();
@@ -157,7 +161,7 @@ async fn complete_session_notification_to_usb_and_outputs() {
     controller.initialize(&channels, 7).await.unwrap();
     controller
         .pair(
-            Address::new(0x112233445566).unwrap(),
+            Address::new(0x1122_3344_5566).unwrap(),
             [0x11; 16],
             [0x22; 16],
         )
@@ -182,7 +186,7 @@ async fn complete_session_notification_to_usb_and_outputs() {
             send(&mut peer, urb(seq, 0, 2, bytes.len()), &bytes).await;
             assert_eq!(reply(&mut peer).await.1, 0);
             send(&mut peer, urb(seq + 10, 1, 2, 64), &[]).await;
-            assert!(!reply(&mut peer).await.2.is_empty());
+            assert_ne!(reply(&mut peer).await.2, [] as [u8; 0]);
         }
         send(&mut peer, urb(20, 1, 1, 64), &[]).await;
         reply(&mut peer).await;
@@ -210,7 +214,7 @@ async fn complete_session_notification_to_usb_and_outputs() {
         tokio::time::advance(Duration::from_millis(4)).await;
         let idle = reply(&mut peer).await.2;
         assert_eq!(&idle[43..47], &data[43..47]);
-        let rumble: [u8; 33] = std::array::from_fn(|i| i as u8);
+        let rumble: [u8; 33] = std::array::from_fn(|i| u8::try_from(i).unwrap());
         let mut rumble = rumble;
         rumble[0] = 2;
         send(&mut peer, urb(30, 0, 1, 33), &rumble).await;
@@ -230,7 +234,7 @@ async fn complete_session_notification_to_usb_and_outputs() {
         assert!(link.writes().iter().any(|(ch,b)|*ch==Characteristic::Command&&*b==command::set_player_leds(15)));
         cancel.cancel();
     };
-    let (_, usb, _) = tokio::join!(
+    let ((), usb, _) = tokio::join!(
         host,
         serve_urbs(stream, channels.clone(), cancel.clone()),
         controller.run(&channels, &cancel)
@@ -271,7 +275,7 @@ async fn pending_bulk_unlink_stall_and_partial_header_survive_input() {
         assert_eq!(reply(&mut peer).await.1, -32);
         cancel.cancel();
     };
-    let (_, r) = tokio::join!(host, serve_urbs(stream, channels.clone(), cancel.clone()));
+    let ((), r) = tokio::join!(host, serve_urbs(stream, channels.clone(), cancel.clone()));
     r.unwrap();
 }
 #[tokio::test]
@@ -341,7 +345,7 @@ async fn flash_reply_survives_split_bulk_reads_without_consuming_the_next_reply(
             );
             cancel.cancel();
         };
-        let (_, result) = tokio::join!(
+        let ((), result) = tokio::join!(
             host,
             serve_urbs(stream, Channels::default(), cancel.clone())
         );
@@ -405,7 +409,7 @@ async fn rumble_leading_edge_latest_value_twenty_ms_and_setup_output_replay() {
         assert_eq!(vibrations()[1][1], 4, "superseded rumble must not queue");
         cancel.cancel();
     };
-    let (_, result) = tokio::join!(driver, controller.run(&channels, &cancel));
+    let ((), result) = tokio::join!(driver, controller.run(&channels, &cancel));
     assert!(result.is_err());
 }
 
@@ -428,12 +432,12 @@ async fn discovery_pairing_cache_host_override_and_pair_once_per_process() {
     };
     let bluetooth = FakeController::new(FakeOptions {
         report,
-        discovered_address: Some(Address::new(0x123456789abc).unwrap()),
-        adapter_address: Some(Address::new(0x112233445566).unwrap()),
+        discovered_address: Some(Address::new(0x1234_5678_9abc).unwrap()),
+        adapter_address: Some(Address::new(0x1122_3344_5566).unwrap()),
         ..Default::default()
     });
     let channels = Channels::default();
-    let attempt_cache = ns2pro_bridge::cache::Cache::new(cache.path());
+    let attempt_cache = Cache::new(cache.path());
     let mut paired = false;
     for _ in 0..2 {
         let cancel = CancellationToken::new();
@@ -544,7 +548,7 @@ async fn late_notification_cannot_overwrite_neutral_after_disconnect() {
     let callback_channels = channels.clone();
     bluetooth.on_close(move |mut input| {
         let neutral = *callback_channels.input.borrow();
-        assert_eq!(neutral.state, Default::default());
+        assert_eq!(neutral.state, InputState::default());
         assert_eq!(neutral.motion_timestamp_us, 0);
         assert_eq!(*callback_channels.rumble.borrow(), None);
         assert_eq!(
@@ -568,7 +572,7 @@ async fn late_notification_cannot_overwrite_neutral_after_disconnect() {
             connection_report
         );
         bluetooth.notify(&report());
-        assert_ne!(channels.input.borrow().state.buttons, Default::default());
+        assert_ne!(channels.input.borrow().state.buttons, Buttons::default());
         channels.output(ns2pro_usb::Output::Rumble {
             left: [1; 16],
             right: [2; 16],
@@ -589,6 +593,6 @@ async fn late_notification_cannot_overwrite_neutral_after_disconnect() {
     assert!(outcome.established);
     assert!(outcome.result.is_err());
     assert_eq!(bluetooth.observed().closes, 1);
-    assert_eq!(channels.input.borrow().state, Default::default());
+    assert_eq!(channels.input.borrow().state, InputState::default());
     assert_eq!(*channels.rumble.borrow(), None);
 }

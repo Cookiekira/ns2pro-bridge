@@ -15,7 +15,11 @@ pub enum Abi {
 }
 impl Abi {
     pub const SUPPORTED: [Self; 3] = [Self::V0981, Self::V0978, Self::V0977];
+    #[must_use]
     pub const fn size(self) -> usize {
+        self.wire_size() as usize
+    }
+    const fn wire_size(self) -> u16 {
         match self {
             Self::V0981 => 1124,
             Self::V0978 => 1116,
@@ -52,6 +56,12 @@ impl std::fmt::Display for WireError {
 }
 impl std::error::Error for WireError {}
 
+/// Encodes a [`PLUGIN_HARDWARE`] request for `abi`.
+///
+/// # Errors
+///
+/// [`WireError::ZeroPort`] or [`WireError::InvalidHost`] for an address the
+/// driver cannot attach to.
 pub fn plugin(address: SocketAddr, abi: Abi) -> Result<Vec<u8>, WireError> {
     if address.port() == 0 {
         return Err(WireError::ZeroPort);
@@ -60,7 +70,7 @@ pub fn plugin(address: SocketAddr, abi: Abi) -> Result<Vec<u8>, WireError> {
         return Err(WireError::InvalidHost);
     }
     let mut request = vec![0; abi.size()];
-    request[..4].copy_from_slice(&(abi.size() as u32).to_le_bytes());
+    request[..4].copy_from_slice(&u32::from(abi.wire_size()).to_le_bytes());
     let busid = abi.busid();
     request[busid..busid + 3].copy_from_slice(b"1-1");
     let service_offset = busid + 32;
@@ -81,17 +91,27 @@ pub fn plugin(address: SocketAddr, abi: Abi) -> Result<Vec<u8>, WireError> {
     }
     Ok(request)
 }
+/// Returns the port assigned by a plugin response of `bytes` bytes.
+///
+/// # Errors
+///
+/// [`WireError::InvalidResponse`] for an unexpected size or non-positive port.
 pub fn attached_port(response: &[u8], bytes: u32) -> Result<i32, WireError> {
     let port = response
         .get(4..8)
-        .map(|b| i32::from_le_bytes(b.try_into().unwrap()))
-        .unwrap_or(0);
-    if bytes != PORT_END as u32 || port <= 0 {
+        .and_then(|b| <[u8; 4]>::try_from(b).ok())
+        .map_or(0, i32::from_le_bytes);
+    if usize::try_from(bytes) != Ok(PORT_END) || port <= 0 {
         Err(WireError::InvalidResponse { bytes, port })
     } else {
         Ok(port)
     }
 }
+/// Encodes a [`PLUGOUT_HARDWARE`] request.
+///
+/// # Errors
+///
+/// [`WireError::InvalidResponse`] for a non-positive port.
 pub fn plugout(port: i32) -> Result<[u8; 8], WireError> {
     if port <= 0 {
         return Err(WireError::InvalidResponse { bytes: 8, port });
