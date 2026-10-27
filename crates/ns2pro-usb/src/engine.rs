@@ -15,12 +15,13 @@ pub struct Effects {
     pub input_completions: u64,
     /// How many of those re-encoded the current input without a new sample.
     pub keepalives: u64,
-    /// Sequence number of the sample in the newest completion appended to `replies`.
+    /// Sequence number of the current sample at the latest interrupt-IN completion,
+    /// even when its payload was truncated or empty.
     pub completed_sample_seq: Option<u64>,
 }
 impl Effects {
-    /// Returns and resets `(sample seq, completions, keepalives)` once a
-    /// completion carrying a sample has been appended.
+    /// Returns and resets `(sample seq, completions, keepalives)` after any
+    /// interrupt-IN completion.
     pub fn take_completion_stats(&mut self) -> Option<(u64, u64, u64)> {
         let completions = std::mem::take(&mut self.input_completions);
         let keepalives = std::mem::take(&mut self.keepalives);

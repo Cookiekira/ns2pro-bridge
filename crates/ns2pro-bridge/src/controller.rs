@@ -23,7 +23,7 @@ pub enum ControllerError {
     /// A command response was malformed or answered another command.
     #[error(transparent)]
     Response(#[from] command::ResponseError),
-    /// The controller rejected pairing or its confirmation did not match.
+    /// Pairing setup or exchange failed; see [`PairingError`].
     #[error(transparent)]
     Pairing(#[from] PairingError),
     /// Shutdown cancelled the operation.

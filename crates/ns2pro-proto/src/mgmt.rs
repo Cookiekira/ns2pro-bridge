@@ -268,7 +268,7 @@ pub fn adapter_info(p: &[u8]) -> Result<AdapterInfo, Malformed> {
 /// A Device Found event.
 #[derive(Debug)]
 pub struct Found<'a> {
-    /// Address and address type of the advertising device.
+    /// Address and address type of the discovered device.
     pub device: Device,
     /// Received signal strength in dBm; 127 means unavailable.
     pub rssi: i8,
