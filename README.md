@@ -100,8 +100,6 @@ cargo test --locked --workspace
 
 Output: `target/release/ns2pro-bridge` (`.exe` on Windows). Needs stable Rust (edition 2024).
 
-Releasing: merge the release-plz PR to publish the workspace crates and tag `v<version>`; dist then builds the GitHub release. Configure the `CARGO_REGISTRY_TOKEN` secret (crates.io publish-new/publish-update) and `RELEASE_PLZ_TOKEN` secret ([fine-grained GitHub PAT](https://release-plz.dev/docs/github/token#use-a-personal-access-token) for this repo with Contents and Pull requests read/write so tags trigger dist).
-
 ## Credits and license
 
 - **[VIIPER](https://github.com/Alia5/VIIPER)** by Alia5 (GPL-3.0): the virtual USB device model, descriptors and test fixtures are ported from VIIPER. Its license is in [LICENSES/VIIPER-GPL-3.0.txt](LICENSES/VIIPER-GPL-3.0.txt).

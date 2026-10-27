@@ -100,8 +100,6 @@ cargo test --locked --workspace
 
 输出文件：`target/release/ns2pro-bridge`（Windows 下带 `.exe` 后缀）。需要稳定版 Rust（edition 2024）。
 
-发布流程：合并 release-plz PR 后，发布工作区中的 crate 并创建 `v<version>` 标签，随后由 dist 构建 GitHub Release。需要配置 `CARGO_REGISTRY_TOKEN` secret（crates.io 的 publish-new/publish-update 权限）和 `RELEASE_PLZ_TOKEN` secret（使用对此仓库具有 Contents 和 Pull requests 读写权限的 [GitHub 细粒度 PAT](https://release-plz.dev/docs/github/token#use-a-personal-access-token)，以便标签触发 dist）。
-
 ## 致谢与许可证
 
 - **[VIIPER](https://github.com/Alia5/VIIPER)**，作者 Alia5（GPL-3.0）：虚拟 USB 设备模型、描述符和测试数据移植自 VIIPER。许可证见 [LICENSES/VIIPER-GPL-3.0.txt](LICENSES/VIIPER-GPL-3.0.txt)。
