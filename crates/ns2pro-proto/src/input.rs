@@ -84,10 +84,14 @@ pub fn decode_buttons(raw: &[u8], layout: &[ButtonBit]) -> Buttons {
         .fold(Buttons::NONE, |acc, (button, _, _)| acc | *button)
 }
 
+/// Sets the layout bits of `buttons` in `out`; like [`decode_buttons`], bits
+/// beyond `out` are ignored.
 pub fn encode_buttons(buttons: Buttons, layout: &[ButtonBit], out: &mut [u8]) {
     for (button, index, mask) in layout {
-        if buttons.contains(*button) {
-            out[*index] |= mask;
+        if buttons.contains(*button)
+            && let Some(byte) = out.get_mut(*index)
+        {
+            *byte |= mask;
         }
     }
 }
@@ -173,36 +177,40 @@ pub fn parse_common_report(
     data: &[u8],
     calibration: &Calibration,
 ) -> Result<InputState, ShortReport> {
-    if data.len() < 0x10 {
+    let Some(&[_, _, _, _, b0, b1, b2, b3, _, _, l0, l1, l2, r0, r1, r2]) =
+        data.first_chunk::<0x10>()
+    else {
         return Err(ShortReport(data.len()));
-    }
-    let stick = |offset: usize, cal: Option<&StickCalibration>| {
-        let (x, y) = unpack_stick12([data[offset], data[offset + 1], data[offset + 2]]);
+    };
+    let stick = |raw: [u8; 3], cal: Option<&StickCalibration>| {
+        let (x, y) = unpack_stick12(raw);
         normalize_stick(x, y, cal)
     };
-    let read_i16 = |offset: usize| i16::from_le_bytes([data[offset], data[offset + 1]]);
 
     let mut state = InputState {
-        buttons: decode_buttons(&data[0x04..0x08], &COMMON_BUTTON_LAYOUT),
-        left_stick: stick(0x0A, calibration.primary.as_ref()),
-        right_stick: stick(0x0D, calibration.secondary.as_ref()),
+        buttons: decode_buttons(&[b0, b1, b2, b3], &COMMON_BUTTON_LAYOUT),
+        left_stick: stick([l0, l1, l2], calibration.primary.as_ref()),
+        right_stick: stick([r0, r1, r2], calibration.secondary.as_ref()),
         ..InputState::default()
     };
 
-    if data.len() >= 0x21 {
-        let millivolts = i32::from(u16::from_le_bytes([data[0x1F], data[0x20]]));
+    if let Some(&[low, high]) = data.get(0x1F..0x21) {
+        let millivolts = i32::from(u16::from_le_bytes([low, high]));
         if millivolts > 0 {
             let level = ((millivolts - 3200) * 9 / 800).clamp(0, i32::from(BATTERY_MAX));
             state.battery_level = u8::try_from(level).unwrap_or(BATTERY_MAX);
             state.external_power = true;
         }
     }
-    if data.len() > 0x21 {
-        state.charging = data[0x21] == 0x34;
+    if let Some(&charge) = data.get(0x21) {
+        state.charging = charge == 0x34;
     }
-    if data.len() >= 0x3C {
-        state.accel = [read_i16(0x30), read_i16(0x32), read_i16(0x34)];
-        state.gyro = [read_i16(0x36), read_i16(0x38), read_i16(0x3A)];
+    if let Some(&[ax0, ax1, ay0, ay1, az0, az1, gx0, gx1, gy0, gy1, gz0, gz1]) =
+        data.get(0x30..).and_then(<[u8]>::first_chunk::<12>)
+    {
+        let i16_le = |low, high| i16::from_le_bytes([low, high]);
+        state.accel = [i16_le(ax0, ax1), i16_le(ay0, ay1), i16_le(az0, az1)];
+        state.gyro = [i16_le(gx0, gx1), i16_le(gy0, gy1), i16_le(gz0, gz1)];
     }
     Ok(state)
 }

@@ -21,11 +21,16 @@ pub fn parse(company_id: u16, data: &[u8]) -> Option<AdvertisementMode> {
     if company_id != NINTENDO_COMPANY_ID || data.len() <= MODE_OFFSET {
         return None;
     }
-    let read_u16 = |offset: usize| u16::from_le_bytes([data[offset], data[offset + 1]]);
-    if read_u16(VID_OFFSET) != NINTENDO_VID || read_u16(PID_OFFSET) != NS2PRO_PID {
+    let read_u16 = |offset: usize| {
+        data.get(offset..)
+            .and_then(<[u8]>::first_chunk)
+            .copied()
+            .map(u16::from_le_bytes)
+    };
+    if read_u16(VID_OFFSET) != Some(NINTENDO_VID) || read_u16(PID_OFFSET) != Some(NS2PRO_PID) {
         return None;
     }
-    match data[MODE_OFFSET] {
+    match data.get(MODE_OFFSET)? {
         0x00 => Some(AdvertisementMode::StandardReconnect),
         0x81 => Some(AdvertisementMode::Wake),
         _ => None,

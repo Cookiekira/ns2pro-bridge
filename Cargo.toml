@@ -62,6 +62,14 @@ undocumented_unsafe_blocks = "warn"
 unimplemented = "warn"
 unnecessary_safety_comment = "warn"
 unnecessary_safety_doc = "warn"
+# Panic and cast freedom outside tests (test allowances live in clippy.toml).
+as_conversions = "warn"
+expect_used = "warn"
+indexing_slicing = "warn"
+panic = "warn"
+print_stderr = "warn"
+print_stdout = "warn"
+unwrap_used = "warn"
 
 [profile.release]
 lto = true

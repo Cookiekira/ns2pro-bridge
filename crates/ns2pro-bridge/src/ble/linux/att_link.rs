@@ -151,10 +151,10 @@ impl GattLink for AttLink {
             ));
         }
         let handle = self.handles(c)?.value;
-        let mut p = [0u8; att::MTU as usize];
-        self.shared
-            .send(att::write_command(&mut p, handle, value))
-            .await
+        let mut p = [0u8; att::MTU_LEN];
+        let packet = att::write_command(&mut p, handle, value)
+            .ok_or_else(|| LinkError::Platform("write exceeds negotiated ATT MTU".into()))?;
+        self.shared.send(packet).await
     }
     async fn subscribe(&self, c: Characteristic, sink: NotificationSink) -> Result<(), LinkError> {
         let h = self.handles(c)?;
