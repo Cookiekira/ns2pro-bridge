@@ -1,5 +1,8 @@
 //! Portable lifecycle regressions with external radio/cache and in-memory USB seams.
-#[expect(dead_code)]
+#[expect(
+    dead_code,
+    reason = "each test binary uses a different subset of the shared fakes"
+)]
 #[path = "support/fake.rs"]
 mod fake;
 use fake::*;

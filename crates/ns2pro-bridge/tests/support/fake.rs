@@ -24,6 +24,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent fault-injection switches"
+)]
 pub(crate) struct FakeOptions {
     pub fail_scan: bool,
     pub fail_connect: bool,
@@ -171,6 +175,7 @@ impl Bluetooth for FakeController {
         }
         let closed = CancellationToken::new();
         s.connections.push(closed.clone());
+        drop(s);
         Ok(Self {
             state: self.state.clone(),
             closed,
@@ -200,6 +205,7 @@ impl GattLink for FakeController {
                 .as_mut()
                 .expect("command subscription before write")(&response);
         }
+        drop(s);
         Ok(())
     }
     async fn subscribe(&self, c: Characteristic, sink: NotificationSink) -> Result<(), LinkError> {
@@ -209,6 +215,7 @@ impl GattLink for FakeController {
             Characteristic::CommandResponse => s.response = Some(sink),
             _ => return Err(LinkError::Platform("not notifying".into())),
         }
+        drop(s);
         Ok(())
     }
     fn closed(&self) -> CancellationToken {

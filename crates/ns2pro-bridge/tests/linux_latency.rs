@@ -1,5 +1,8 @@
 //! Repeatable host-side latency/allocation experiment, never a wireless benchmark.
-#[expect(dead_code)]
+#[expect(
+    dead_code,
+    reason = "each test binary uses a different subset of the shared fakes"
+)]
 #[path = "support/fake.rs"]
 mod fake;
 use fake::*;
@@ -33,17 +36,21 @@ fn allocated(bytes: usize) {
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
         allocated(l.size());
+        // SAFETY: the caller upholds GlobalAlloc::alloc's contract; forwarded unchanged.
         unsafe { System.alloc(l) }
     }
     unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
         allocated(l.size());
+        // SAFETY: the caller upholds alloc_zeroed's contract; forwarded unchanged.
         unsafe { System.alloc_zeroed(l) }
     }
     unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+        // SAFETY: p came from System via this allocator with layout l; forwarded unchanged.
         unsafe { System.dealloc(p, l) }
     }
     unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
         allocated(n);
+        // SAFETY: p came from System via this allocator with layout l; forwarded unchanged.
         unsafe { System.realloc(p, l, n) }
     }
 }
@@ -87,20 +94,22 @@ fn pure_sample_to_encoded_response() {
     let data = [0u8; 64];
     let calibration = Calibration::default();
     for i in 0..WARMUP + SAMPLES {
-        engine.submit(urb(i as u32 + 1), &[], i as u64, &mut effects);
+        let step = u32::try_from(i).unwrap();
+        let tick = u64::from(step);
+        engine.submit(urb(step + 1), &[], tick, &mut effects);
         start_count();
         let start = Instant::now();
         let state = parse_common_report(std::hint::black_box(&data), &calibration).unwrap();
         engine.on_sample(
             InputSample {
                 state,
-                seq: i as u64 + 1,
-                motion_timestamp_us: i as u32,
+                seq: tick + 1,
+                motion_timestamp_us: step,
             },
-            i as u64,
+            tick,
             &mut effects,
         );
-        let elapsed = start.elapsed().as_nanos() as u64;
+        let elapsed = u64::try_from(start.elapsed().as_nanos()).unwrap();
         let (n, b) = stop_count();
         assert_eq!(effects.replies.len(), 112);
         assert_eq!(effects.replies[48], 9);
@@ -149,7 +158,8 @@ async fn notification_to_in_memory_response() {
         let mut reply = [0u8; 112];
         let logical_start = tokio::time::Instant::now();
         for i in 0..WARMUP + SAMPLES {
-            peer.write_all(&urb(i as u32 + 1).header()).await.unwrap();
+            let step = u32::try_from(i).unwrap();
+            peer.write_all(&urb(step + 1).header()).await.unwrap();
             tokio::task::yield_now().await;
             start_count();
             let start = Instant::now();
@@ -159,11 +169,11 @@ async fn notification_to_in_memory_response() {
                 Buttons::default()
             });
             peer.read_exact(&mut reply).await.unwrap();
-            let elapsed = start.elapsed().as_nanos() as u64;
+            let elapsed = u64::try_from(start.elapsed().as_nanos()).unwrap();
             let (n, b) = stop_count();
             assert_eq!(
                 u32::from_be_bytes(reply[4..8].try_into().unwrap()),
-                i as u32 + 1
+                step + 1
             );
             assert_eq!(reply[48], 9);
             assert_eq!(reply[51] & 2, if i % 2 == 0 { 2 } else { 0 });
