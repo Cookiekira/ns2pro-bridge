@@ -69,8 +69,8 @@ impl FromStr for Address {
 
 impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let [a, b, c, d, e, g] = self.to_be_bytes();
-        write!(f, "{a:02X}:{b:02X}:{c:02X}:{d:02X}:{e:02X}:{g:02X}")
+        let [b0, b1, b2, b3, b4, b5] = self.to_be_bytes();
+        write!(f, "{b0:02X}:{b1:02X}:{b2:02X}:{b3:02X}:{b4:02X}:{b5:02X}")
     }
 }
 

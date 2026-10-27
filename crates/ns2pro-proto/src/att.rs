@@ -157,33 +157,17 @@ impl Discovery {
         }
         self.stage = Stage::Done;
     }
+    /// Advances discovery with the peer's answer to [`Self::request`].
+    ///
+    /// # Errors
+    ///
+    /// [`AttError::Malformed`] when the PDU does not answer the outstanding
+    /// request or discovery is already done, and [`AttError::Remote`] when the
+    /// peer rejects a request with anything other than "attribute not found".
     pub fn on_response(&mut self, p: &[u8]) -> Result<(), AttError> {
         let req = self.request().ok_or(AttError::Malformed)?;
         if p.first() == Some(&ERROR_RESPONSE) {
-            if p.len() != 5 || p[1] != req[0] {
-                return Err(AttError::Malformed);
-            }
-            if matches!(self.stage, Stage::Mtu) && p[4] == 6 {
-                self.stage = Stage::Services(1);
-                return Ok(());
-            }
-            if p[4] != 0x0a {
-                return Err(AttError::Remote {
-                    request: p[1],
-                    handle: word(p, 2)?,
-                    code: p[4],
-                });
-            }
-            match self.stage {
-                Stage::Services(_) => {
-                    self.declarations = (0..self.services.len()).map(|_| vec![]).collect();
-                    self.next_service(0);
-                }
-                Stage::Characteristics(s, _) => self.next_service(s + 1),
-                Stage::Descriptors(s, c, _) => self.next_descriptor(s, c + 1),
-                _ => return Err(AttError::Malformed),
-            }
-            return Ok(());
+            return self.on_error_response(p, req[0]);
         }
         if p.first().copied() != Some(req[0] + 1) {
             return Err(AttError::Malformed);
@@ -195,100 +179,131 @@ impl Discovery {
                 }
                 self.mtu = MTU.min(word(p, 1)?);
                 self.stage = Stage::Services(1);
+                Ok(())
             }
-            Stage::Services(start) => {
-                let size = *p.get(1).ok_or(AttError::Malformed)? as usize;
-                if ![6, 20].contains(&size)
-                    || p.len() < size + 2
-                    || !(p.len() - 2).is_multiple_of(size)
-                {
-                    return Err(AttError::Malformed);
-                }
-                let mut next = start;
-                for e in p[2..].chunks_exact(size) {
-                    let a = word(e, 0)?;
-                    let b = word(e, 2)?;
-                    if a < next || b < a {
-                        return Err(AttError::Malformed);
-                    }
-                    self.services.push(Service { start: a, end: b });
-                    next = b.saturating_add(1);
-                }
-                if self.services.last().is_some_and(|s| s.end == 0xffff) {
-                    self.declarations = (0..self.services.len()).map(|_| vec![]).collect();
-                    self.next_service(0);
-                } else {
-                    self.stage = Stage::Services(next);
-                }
+            Stage::Services(start) => self.on_services(p, start),
+            Stage::Characteristics(s, start) => self.on_characteristics(p, s, start),
+            Stage::Descriptors(s, c, start) => self.on_descriptors(p, s, c, start),
+            Stage::Done => Err(AttError::Malformed),
+        }
+    }
+    fn on_error_response(&mut self, p: &[u8], request: u8) -> Result<(), AttError> {
+        if p.len() != 5 || p[1] != request {
+            return Err(AttError::Malformed);
+        }
+        if matches!(self.stage, Stage::Mtu) && p[4] == 6 {
+            self.stage = Stage::Services(1);
+            return Ok(());
+        }
+        if p[4] != 0x0a {
+            return Err(AttError::Remote {
+                request: p[1],
+                handle: word(p, 2)?,
+                code: p[4],
+            });
+        }
+        match self.stage {
+            Stage::Services(_) => {
+                self.declarations = (0..self.services.len()).map(|_| vec![]).collect();
+                self.next_service(0);
             }
-            Stage::Characteristics(s, start) => {
-                let size = *p.get(1).ok_or(AttError::Malformed)? as usize;
-                if ![7, 21].contains(&size)
-                    || p.len() < size + 2
-                    || !(p.len() - 2).is_multiple_of(size)
-                {
-                    return Err(AttError::Malformed);
-                }
-                let mut next = start;
-                for e in p[2..].chunks_exact(size) {
-                    let handle = word(e, 0)?;
-                    let value = word(e, 3)?;
-                    if handle < next || value <= handle || value > self.services[s].end {
-                        return Err(AttError::Malformed);
-                    }
-                    let kind = if size == 21 {
-                        let mut bytes: [u8; 16] =
-                            e[5..].try_into().map_err(|_| AttError::Malformed)?;
-                        bytes.reverse();
-                        Characteristic::from_uuid(Uuid::from_bytes(bytes))
-                    } else {
-                        None
-                    };
-                    self.declarations[s].push(Declaration {
-                        handle,
-                        value,
-                        kind,
-                        cccd: None,
-                    });
-                    next = handle.saturating_add(1);
-                }
-                if next >= self.services[s].end {
-                    self.next_service(s + 1);
-                } else {
-                    self.stage = Stage::Characteristics(s, next);
-                }
-            }
-            Stage::Descriptors(s, c, start) => {
-                let size = match p.get(1) {
-                    Some(1) => 4,
-                    Some(2) => 18,
-                    _ => return Err(AttError::Malformed),
-                };
-                if p.len() < size + 2 || !(p.len() - 2).is_multiple_of(size) {
-                    return Err(AttError::Malformed);
-                }
-                let end = self.descriptor_end(s, c);
-                let mut last = 0;
-                for e in p[2..].chunks_exact(size) {
-                    let handle = word(e, 0)?;
-                    if handle < start || handle <= last || handle > end {
-                        return Err(AttError::Malformed);
-                    }
-                    last = handle;
-                    if size == 4 && word(e, 2)? == 0x2902 {
-                        self.declarations[s][c].cccd = Some(handle);
-                    }
-                }
-                if self.declarations[s][c].cccd.is_some() || last == end {
-                    self.next_descriptor(s, c + 1);
-                } else {
-                    self.stage = Stage::Descriptors(s, c, last + 1);
-                }
-            }
-            Stage::Done => return Err(AttError::Malformed),
+            Stage::Characteristics(s, _) => self.next_service(s + 1),
+            Stage::Descriptors(s, c, _) => self.next_descriptor(s, c + 1),
+            _ => return Err(AttError::Malformed),
         }
         Ok(())
     }
+    fn on_services(&mut self, p: &[u8], start: u16) -> Result<(), AttError> {
+        let size = *p.get(1).ok_or(AttError::Malformed)? as usize;
+        if ![6, 20].contains(&size) || p.len() < size + 2 || !(p.len() - 2).is_multiple_of(size) {
+            return Err(AttError::Malformed);
+        }
+        let mut next = start;
+        for e in p[2..].chunks_exact(size) {
+            let a = word(e, 0)?;
+            let b = word(e, 2)?;
+            if a < next || b < a {
+                return Err(AttError::Malformed);
+            }
+            self.services.push(Service { start: a, end: b });
+            next = b.saturating_add(1);
+        }
+        if self.services.last().is_some_and(|s| s.end == 0xffff) {
+            self.declarations = (0..self.services.len()).map(|_| vec![]).collect();
+            self.next_service(0);
+        } else {
+            self.stage = Stage::Services(next);
+        }
+        Ok(())
+    }
+    fn on_characteristics(&mut self, p: &[u8], s: usize, start: u16) -> Result<(), AttError> {
+        let size = *p.get(1).ok_or(AttError::Malformed)? as usize;
+        if ![7, 21].contains(&size) || p.len() < size + 2 || !(p.len() - 2).is_multiple_of(size) {
+            return Err(AttError::Malformed);
+        }
+        let mut next = start;
+        for e in p[2..].chunks_exact(size) {
+            let handle = word(e, 0)?;
+            let value = word(e, 3)?;
+            if handle < next || value <= handle || value > self.services[s].end {
+                return Err(AttError::Malformed);
+            }
+            let kind = if size == 21 {
+                let mut bytes: [u8; 16] = e[5..].try_into().map_err(|_| AttError::Malformed)?;
+                bytes.reverse();
+                Characteristic::from_uuid(Uuid::from_bytes(bytes))
+            } else {
+                None
+            };
+            self.declarations[s].push(Declaration {
+                handle,
+                value,
+                kind,
+                cccd: None,
+            });
+            next = handle.saturating_add(1);
+        }
+        if next >= self.services[s].end {
+            self.next_service(s + 1);
+        } else {
+            self.stage = Stage::Characteristics(s, next);
+        }
+        Ok(())
+    }
+    fn on_descriptors(&mut self, p: &[u8], s: usize, c: usize, start: u16) -> Result<(), AttError> {
+        let size = match p.get(1) {
+            Some(1) => 4,
+            Some(2) => 18,
+            _ => return Err(AttError::Malformed),
+        };
+        if p.len() < size + 2 || !(p.len() - 2).is_multiple_of(size) {
+            return Err(AttError::Malformed);
+        }
+        let end = self.descriptor_end(s, c);
+        let mut last = 0;
+        for e in p[2..].chunks_exact(size) {
+            let handle = word(e, 0)?;
+            if handle < start || handle <= last || handle > end {
+                return Err(AttError::Malformed);
+            }
+            last = handle;
+            if size == 4 && word(e, 2)? == 0x2902 {
+                self.declarations[s][c].cccd = Some(handle);
+            }
+        }
+        if self.declarations[s][c].cccd.is_some() || last == end {
+            self.next_descriptor(s, c + 1);
+        } else {
+            self.stage = Stage::Descriptors(s, c, last + 1);
+        }
+        Ok(())
+    }
+    /// Returns the handles of every known characteristic.
+    ///
+    /// # Errors
+    ///
+    /// [`AttError::Malformed`] before discovery is done, and [`AttError::Missing`]
+    /// when a characteristic or a required CCCD was not found.
     pub fn finish(&self) -> Result<Vec<Handles>, AttError> {
         if !matches!(self.stage, Stage::Done) {
             return Err(AttError::Malformed);
@@ -330,6 +345,9 @@ pub enum Packet<'a> {
     Response(&'a [u8]),
     Ignore,
 }
+/// # Errors
+///
+/// [`AttError::Malformed`] for an empty or truncated PDU.
 pub fn classify(p: &[u8]) -> Result<Packet<'_>, AttError> {
     let op = *p.first().ok_or(AttError::Malformed)?;
     match op {

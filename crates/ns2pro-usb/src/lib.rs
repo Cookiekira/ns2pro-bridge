@@ -1,4 +1,6 @@
 //! Pure device and USB/IP engine. No runtime or clock dependencies.
+#![forbid(unsafe_code)]
+
 pub mod descriptors;
 pub mod device;
 pub mod engine;

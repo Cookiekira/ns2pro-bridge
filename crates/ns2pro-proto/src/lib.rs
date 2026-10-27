@@ -5,6 +5,8 @@
 //! I/O shell in `ns2pro-bridge`, which keeps the protocol testable without
 //! hardware.
 
+#![forbid(unsafe_code)]
+
 pub mod address;
 pub mod advertisement;
 pub mod att;

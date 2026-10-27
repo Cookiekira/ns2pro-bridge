@@ -123,11 +123,10 @@ pub fn unpack_stick12(raw: [u8; 3]) -> (u16, u16) {
 pub fn pack_stick12(x: u16, y: u16) -> [u8; 3] {
     let x = x.min(STICK_MAX);
     let y = y.min(STICK_MAX);
-    [
-        x as u8,
-        ((x >> 8) & 0x0F) as u8 | ((y & 0x0F) << 4) as u8,
-        (y >> 4) as u8,
-    ]
+    // y <= 0x0FFF, so `y << 4` keeps all 12 bits: low nibble in byte 0, rest in byte 1.
+    let [x_lo, x_hi] = x.to_le_bytes();
+    let [y_lo, y_hi] = (y << 4).to_le_bytes();
+    [x_lo, (x_hi & 0x0F) | y_lo, y_hi]
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -166,6 +165,10 @@ impl Default for InputState {
 pub struct ShortReport(pub usize);
 
 /// Decodes a BLE common input report (notified on [`crate::gatt::Characteristic::Input`]).
+///
+/// # Errors
+///
+/// [`ShortReport`] when `data` is shorter than the 16-byte button and stick block.
 pub fn parse_common_report(
     data: &[u8],
     calibration: &Calibration,
@@ -189,8 +192,8 @@ pub fn parse_common_report(
     if data.len() >= 0x21 {
         let millivolts = i32::from(u16::from_le_bytes([data[0x1F], data[0x20]]));
         if millivolts > 0 {
-            state.battery_level =
-                ((millivolts - 3200) * 9 / 800).clamp(0, i32::from(BATTERY_MAX)) as u8;
+            state.battery_level = u8::try_from((millivolts - 3200) * 9 / 800)
+                .map_or(0, |level| level.min(BATTERY_MAX));
             state.external_power = true;
         }
     }
@@ -205,16 +208,16 @@ pub fn parse_common_report(
 }
 
 fn normalize_stick(x: u16, y: u16, calibration: Option<&StickCalibration>) -> Stick {
-    match calibration {
-        Some(c) => Stick {
-            x: normalize_axis(i32::from(x), c.center_x, c.max_x, c.min_x),
-            y: normalize_axis(i32::from(y), c.center_y, c.max_y, c.min_y),
-        },
-        None => Stick {
+    calibration.map_or_else(
+        || Stick {
             x: x.min(STICK_MAX),
             y: y.min(STICK_MAX),
         },
-    }
+        |c| Stick {
+            x: normalize_axis(i32::from(x), c.center_x, c.max_x, c.min_x),
+            y: normalize_axis(i32::from(y), c.center_y, c.max_y, c.min_y),
+        },
+    )
 }
 
 /// Maps a raw axis onto `0..=0x0FFF` around `0x0800` using per-direction spans.
@@ -235,7 +238,7 @@ fn normalize_axis(value: i32, center: i32, positive_span: i32, negative_span: i3
     } else {
         mid - ((center - value) * (mid - min) + negative_span / 2) / negative_span
     };
-    out.clamp(min, max) as u16
+    u16::try_from(out.clamp(min, max)).unwrap_or(STICK_CENTER)
 }
 
 #[cfg(test)]

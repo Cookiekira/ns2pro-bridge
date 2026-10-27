@@ -6,6 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+readme.workspace = true
+keywords = ["switch2", "controller", "bluetooth", "ble", "usbip"]
+categories = ["hardware-support", "command-line-utilities"]
 
 [[bin]]
 name = "ns2pro-bridge"

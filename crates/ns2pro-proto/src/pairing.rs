@@ -27,6 +27,9 @@ pub struct Pairing {
     stage: u8,
 }
 impl Pairing {
+    /// # Errors
+    ///
+    /// [`PairingError::ZeroAddress`] when `host` is zero.
     pub const fn new(
         host: Address,
         key: [u8; 16],
@@ -49,7 +52,7 @@ impl Pairing {
             0 => {
                 let mut p = vec![0, 2];
                 p.extend(self.host.to_le_bytes());
-                p.extend(Address::new(self.host.value() - 1).unwrap().to_le_bytes());
+                p.extend(Address::new(self.host.value() - 1)?.to_le_bytes());
                 (1, p)
             }
             1 => (4, [&[0][..], &self.key].concat()),
@@ -59,6 +62,13 @@ impl Pairing {
         };
         Some(command(0x15, sub, &payload))
     }
+    /// Advances pairing with the controller's reply to [`Self::next_command`].
+    ///
+    /// # Errors
+    ///
+    /// [`PairingError::Response`] for a malformed reply, [`PairingError::Rejected`]
+    /// when the controller refuses a stage or pairing already finished, and
+    /// [`PairingError::Confirmation`] when the derived LTK does not match.
     pub fn on_response(&mut self, reply: &[u8]) -> Result<(), PairingError> {
         let sub = [1, 4, 2, 3]
             .get(self.stage as usize)
@@ -99,7 +109,7 @@ mod tests {
     #[test]
     fn complete_and_reject() {
         let mut p = Pairing::new(
-            Address::new(0x112233445566).unwrap(),
+            Address::new(0x1122_3344_5566).unwrap(),
             [0x11; 16],
             [0x22; 16],
         )

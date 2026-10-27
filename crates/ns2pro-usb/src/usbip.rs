@@ -15,12 +15,22 @@ pub struct Urb {
     pub unlink_seq: u32,
 }
 impl Urb {
+    /// Decodes a `USBIP_CMD_SUBMIT` or `USBIP_CMD_UNLINK` header.
+    ///
+    /// # Errors
+    ///
+    /// For other commands, oversize transfers, invalid endpoints and
+    /// isochronous submissions.
     pub fn decode(h: &[u8; 48]) -> Result<Self, UsbipError> {
-        let get = |i| u32::from_be_bytes(h[i..i + 4].try_into().unwrap());
+        let get = |i: usize| u32::from_be_bytes([h[i], h[i + 1], h[i + 2], h[i + 3]]);
         if ![1, 2].contains(&get(0)) {
             return Err(UsbipError("unsupported command"));
         }
-        let length = if get(0) == 1 { get(24) as usize } else { 0 };
+        let length = if get(0) == 1 {
+            usize::try_from(get(24)).unwrap_or(usize::MAX)
+        } else {
+            0
+        };
         if length > MAX_TRANSFER || get(12) > 1 || get(16) > 15 || (get(0) == 1 && get(32) != 0) {
             return Err(UsbipError(
                 "invalid length, endpoint or isochronous request",
@@ -33,7 +43,7 @@ impl Urb {
             direction: get(12),
             ep: get(16),
             length,
-            setup: h[40..48].try_into().unwrap(),
+            setup: std::array::from_fn(|i| h[40 + i]),
             unlink_seq: get(20),
         })
     }
@@ -46,7 +56,7 @@ impl Urb {
             (8, self.devid),
             (12, self.direction),
             (16, self.ep),
-            (24, self.length as u32),
+            (24, u32::try_from(self.length).unwrap_or(u32::MAX)),
         ] {
             h[i..i + 4].copy_from_slice(&v.to_be_bytes());
         }
@@ -67,12 +77,12 @@ pub fn reply_into(out: &mut Vec<u8>, urb: Urb, status: i32, payload: &[u8], actu
         (8, urb.devid),
         (12, urb.direction),
         (16, urb.ep),
-        (20, status as u32),
+        (20, status.cast_unsigned()),
     ] {
         h[i..i + 4].copy_from_slice(&v.to_be_bytes());
     }
     if urb.command == 1 {
-        h[24..28].copy_from_slice(&(actual as u32).to_be_bytes());
+        h[24..28].copy_from_slice(&u32::try_from(actual).unwrap_or(u32::MAX).to_be_bytes());
     }
     out.extend_from_slice(payload);
 }
@@ -116,16 +126,8 @@ impl ManagementRequest {
 /// Fixed single-device export. Descriptors and interface classes match VIIPER.
 #[must_use]
 pub fn management_reply(op: u16, valid: bool) -> Vec<u8> {
-    let mut b = vec![
-        1,
-        0x11,
-        (op >> 8) as u8,
-        op as u8,
-        0,
-        0,
-        0,
-        u8::from(!valid),
-    ];
+    let [op_hi, op_lo] = op.to_be_bytes();
+    let mut b = vec![1, 0x11, op_hi, op_lo, 0, 0, 0, u8::from(!valid)];
     if !valid {
         return b;
     }

@@ -1,5 +1,7 @@
 //! Controller command framing on [`crate::gatt::Characteristic::Command`].
 
+use std::fmt::Write as _;
+
 pub const FEATURE_BUTTONS: u8 = 0x01;
 pub const FEATURE_STICKS: u8 = 0x02;
 pub const FEATURE_IMU: u8 = 0x04;
@@ -11,6 +13,10 @@ pub const DEFAULT_LED_PATTERN: u8 = 0x06;
 pub const RUMBLE_PACKET_LEN: usize = 42;
 
 /// `[cmd, 0x91, seq, sub, 0, len, 0, 0, payload..]`.
+///
+/// # Panics
+///
+/// If `payload` is longer than 255 bytes; every caller passes a fixed-size payload.
 #[must_use]
 pub fn command(cmd: u8, sub: u8, payload: &[u8]) -> Vec<u8> {
     let len = u8::try_from(payload.len()).expect("command payload fits in one byte");
@@ -32,10 +38,20 @@ pub enum ResponseError {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02X}")).collect()
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut out, b| {
+            let _ = write!(out, "{b:02X}");
+            out
+        })
 }
 
 /// Validates the response header and returns the payload after it.
+///
+/// # Errors
+///
+/// [`ResponseError::Short`] for a response shorter than the header, and
+/// [`ResponseError::Unexpected`] when `cmd` or `sub` do not match.
 pub fn response_payload(response: &[u8], cmd: u8, sub: u8) -> Result<&[u8], ResponseError> {
     if response.len() < 8 {
         return Err(ResponseError::Short(response.to_vec()));
@@ -72,6 +88,11 @@ pub fn spi_read(address: u32, size: u8) -> Vec<u8> {
 }
 
 /// Extracts the data of a [`spi_read`] response.
+///
+/// # Errors
+///
+/// Any [`response_payload`] error, [`ResponseError::ShortSpi`] for a truncated
+/// SPI header, and [`ResponseError::SpiAddress`] when another address was read.
 pub fn spi_read_data(response: &[u8], address: u32) -> Result<&[u8], ResponseError> {
     let payload = response_payload(response, 0x02, 0x04)?;
     if payload.len() < 8 {
@@ -151,8 +172,8 @@ mod tests {
 
     #[test]
     fn builds_rumble_packet() {
-        let left: [u8; 16] = std::array::from_fn(|i| i as u8 + 1);
-        let right: [u8; 16] = std::array::from_fn(|i| i as u8 + 17);
+        let left: [u8; 16] = std::array::from_fn(|i| u8::try_from(i + 1).unwrap());
+        let right: [u8; 16] = std::array::from_fn(|i| u8::try_from(i + 17).unwrap());
         let packet = rumble_packet(&left, &right);
         assert_eq!(packet[0], 0);
         assert_eq!(packet[1..17], left);

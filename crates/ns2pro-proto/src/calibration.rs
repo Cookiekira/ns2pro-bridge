@@ -7,7 +7,7 @@ pub const PRIMARY_FACTORY_ADDRESS: u32 = 0x13080;
 /// Factory calibration block for the right stick.
 pub const SECONDARY_FACTORY_ADDRESS: u32 = 0x130C0;
 /// User calibration block for both sticks.
-pub const USER_ADDRESS: u32 = 0x1FC040;
+pub const USER_ADDRESS: u32 = 0x1F_C040;
 pub const BLOCK_SIZE: u8 = 0x40;
 
 const FACTORY_OFFSET: usize = 0x28;

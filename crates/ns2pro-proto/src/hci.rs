@@ -75,6 +75,11 @@ pub enum Event<'a> {
     CommandStatus(u8),
     Other,
 }
+/// Parses an HCI event packet, including its `0x04` packet indicator.
+///
+/// # Errors
+///
+/// When the framing length is inconsistent or an LE meta event is truncated.
 pub fn parse(p: &[u8]) -> io::Result<Event<'_>> {
     if p.len() < 3 || p[0] != 4 || p.len() != usize::from(p[2]) + 3 {
         return Err(io::Error::other("malformed HCI event framing"));

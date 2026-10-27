@@ -8,6 +8,7 @@ edition = "2024"
 rust-version = "1.88"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/Cookiekira/ns2pro-bridge"
+readme = "README.md"
 
 [workspace.dependencies]
 ns2pro-proto = { path = "crates/ns2pro-proto", version = "0.3.1" }
