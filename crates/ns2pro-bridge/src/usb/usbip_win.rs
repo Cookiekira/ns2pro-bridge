@@ -76,7 +76,8 @@ fn raw(handle: &OwnedHandle) -> HANDLE {
     HANDLE(handle.as_raw_handle())
 }
 fn owned(handle: HANDLE) -> OwnedHandle {
-    // SAFETY: only called on newly returned successful CreateFile/CreateEvent handles.
+    // SAFETY: only called on handles just returned by a successful Win32 open/create
+    // call (CreateFileW, CreateEventW, OpenEventW), which the caller owns exclusively.
     unsafe { OwnedHandle::from_raw_handle(handle.0) }
 }
 struct DeviceList(HDEVINFO);

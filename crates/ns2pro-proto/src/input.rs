@@ -192,8 +192,8 @@ pub fn parse_common_report(
     if data.len() >= 0x21 {
         let millivolts = i32::from(u16::from_le_bytes([data[0x1F], data[0x20]]));
         if millivolts > 0 {
-            state.battery_level = u8::try_from((millivolts - 3200) * 9 / 800)
-                .map_or(0, |level| level.min(BATTERY_MAX));
+            let level = ((millivolts - 3200) * 9 / 800).clamp(0, i32::from(BATTERY_MAX));
+            state.battery_level = u8::try_from(level).unwrap_or(BATTERY_MAX);
             state.external_power = true;
         }
     }
@@ -285,6 +285,24 @@ mod tests {
         assert!(state.charging);
         assert_eq!(state.accel[0], -5);
         assert_eq!(state.gyro[2], 7);
+    }
+
+    #[test]
+    fn battery_level_clamps_at_both_ends() {
+        for (millivolts, level) in [
+            (1, 0),
+            (3200, 0),
+            (4000, BATTERY_MAX),
+            (25_955, BATTERY_MAX),
+            (25_956, BATTERY_MAX),
+            (u16::MAX, BATTERY_MAX),
+        ] {
+            let mut r = report();
+            r.resize(0x21, 0);
+            r[0x1F..0x21].copy_from_slice(&millivolts.to_le_bytes());
+            let state = parse_common_report(&r, &Calibration::default()).unwrap();
+            assert_eq!(state.battery_level, level, "{millivolts} mV");
+        }
     }
 
     #[test]

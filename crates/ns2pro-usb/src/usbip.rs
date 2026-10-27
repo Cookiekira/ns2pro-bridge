@@ -56,7 +56,7 @@ impl Urb {
             (8, self.devid),
             (12, self.direction),
             (16, self.ep),
-            (24, u32::try_from(self.length).unwrap_or(u32::MAX)),
+            (24, wire_length(self.length)),
         ] {
             h[i..i + 4].copy_from_slice(&v.to_be_bytes());
         }
@@ -66,6 +66,14 @@ impl Urb {
         }
         h
     }
+}
+/// USB/IP length fields carry the low 32 bits of a length.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the wire field is 32 bits; decode bounds lengths by MAX_TRANSFER"
+)]
+const fn wire_length(length: usize) -> u32 {
+    length as u32
 }
 pub fn reply_into(out: &mut Vec<u8>, urb: Urb, status: i32, payload: &[u8], actual: usize) {
     let start = out.len();
@@ -82,7 +90,7 @@ pub fn reply_into(out: &mut Vec<u8>, urb: Urb, status: i32, payload: &[u8], actu
         h[i..i + 4].copy_from_slice(&v.to_be_bytes());
     }
     if urb.command == 1 {
-        h[24..28].copy_from_slice(&u32::try_from(actual).unwrap_or(u32::MAX).to_be_bytes());
+        h[24..28].copy_from_slice(&wire_length(actual).to_be_bytes());
     }
     out.extend_from_slice(payload);
 }
@@ -152,6 +160,25 @@ pub fn management_reply(op: u16, valid: bool) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn oversized_lengths_keep_their_low_32_bits() {
+        let urb = Urb {
+            command: 1,
+            seq: 0,
+            devid: 0,
+            direction: 0,
+            ep: 0,
+            length: 0x1_0000_0005,
+            setup: [0; 8],
+            unlink_seq: 0,
+        };
+        assert_eq!(urb.header()[24..28], 5u32.to_be_bytes());
+        let mut out = Vec::new();
+        reply_into(&mut out, urb, 0, &[], 0x1_0000_0007);
+        assert_eq!(out[24..28], 7u32.to_be_bytes());
+    }
 
     #[test]
     fn management_headers_and_import_busids_preserve_reply_contract() {
