@@ -1,17 +1,28 @@
 //! USB/IP management and transfer framing (network byte order).
+/// A USB/IP frame the bridge rejects.
 #[derive(Debug, thiserror::Error)]
 #[error("invalid USB/IP frame: {0}")]
 pub struct UsbipError(pub &'static str);
+/// Largest transfer the bridge accepts.
 pub const MAX_TRANSFER: usize = 1024 * 1024;
+/// A decoded `USBIP_CMD_SUBMIT` or `USBIP_CMD_UNLINK` header.
 #[derive(Clone, Copy, Debug)]
 pub struct Urb {
+    /// 1 for submit, 2 for unlink.
     pub command: u32,
+    /// Request sequence number, echoed in the reply.
     pub seq: u32,
+    /// Device ID.
     pub devid: u32,
+    /// 0 for OUT, 1 for IN.
     pub direction: u32,
+    /// Endpoint number.
     pub ep: u32,
+    /// Transfer buffer length; 0 for unlink.
     pub length: usize,
+    /// Control setup packet.
     pub setup: [u8; 8],
+    /// For unlink, the sequence number to cancel.
     pub unlink_seq: u32,
 }
 impl Urb {
@@ -70,6 +81,7 @@ impl Urb {
             unlink_seq: word(unlink_seq),
         })
     }
+    /// Encodes the header; the inverse of [`Self::decode`].
     #[must_use]
     pub fn header(self) -> [u8; 48] {
         let unlink_seq = if self.command == 2 {
@@ -109,6 +121,7 @@ impl Urb {
 const fn wire_length(length: usize) -> u32 {
     length as u32
 }
+/// Appends a `USBIP_RET_SUBMIT` (or `USBIP_RET_UNLINK`) reply for `urb` to `out`.
 pub fn reply_into(out: &mut Vec<u8>, urb: Urb, status: i32, payload: &[u8], actual: usize) {
     // CMD_UNLINK (2) is answered by RET_UNLINK (4), everything else by RET_SUBMIT (3);
     // only a submit reply carries actual_length.
@@ -143,6 +156,7 @@ pub struct ManagementRequest {
     valid: bool,
 }
 impl ManagementRequest {
+    /// Parses an 8-byte management header.
     #[must_use]
     pub fn parse(header: &[u8; 8]) -> Self {
         Self {
@@ -150,18 +164,22 @@ impl ManagementRequest {
             valid: header[..2] == [1, 0x11] && header[4..] == [0; 4],
         }
     }
+    /// Whether this is `OP_REQ_IMPORT`.
     #[must_use]
     pub const fn is_import(self) -> bool {
         self.op == 0x8003
     }
+    /// Whether the header is valid and `busid` names the exported device "1-1".
     #[must_use]
     pub fn valid_busid(self, busid: &[u8; 32]) -> bool {
         self.valid && busid[..3] == *b"1-1" && busid[3..].iter().all(|b| *b == 0)
     }
+    /// Whether the connection stays open for another request (`OP_REQ_DEVLIST`).
     #[must_use]
     pub const fn keep_open(self) -> bool {
         self.valid && self.op == 0x8005
     }
+    /// The reply to send; an import's `busid` decides whether it succeeds.
     #[must_use]
     pub fn reply(self, busid: Option<&[u8; 32]>) -> Vec<u8> {
         let valid = match self.op {

@@ -8,17 +8,30 @@ use ns2pro_proto::{
     input::{COMMON_BUTTON_LAYOUT, encode_buttons, pack_stick12},
 };
 use std::collections::VecDeque;
+/// Controller input stamped for the USB reports.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct InputSample {
+    /// Decoded input.
     pub state: InputState,
+    /// Wrapping microsecond timestamp of the IMU sample.
     pub motion_timestamp_us: u32,
+    /// Increments with every new input; identifies it in latency statistics.
     pub seq: u64,
 }
+/// A host request for the physical controller.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Output {
-    Rumble { left: [u8; 16], right: [u8; 16] },
+    /// Rumble for both actuators.
+    Rumble {
+        /// Left actuator rumble data.
+        left: [u8; 16],
+        /// Right actuator rumble data.
+        right: [u8; 16],
+    },
+    /// Player LED mask.
     PlayerLeds(u8),
 }
+/// The emulated controller's USB behaviour: reports, features and bulk commands.
 #[derive(Debug)]
 pub struct Ns2ProDevice {
     report: u8,
@@ -45,6 +58,7 @@ impl Default for Ns2ProDevice {
     }
 }
 impl Ns2ProDevice {
+    /// Serves `identity` as SPI block 0x13000; `None` uses [`flash_block`].
     pub const fn set_identity(&mut self, identity: Option<[u8; 64]>) {
         self.identity = identity;
     }
@@ -55,6 +69,7 @@ impl Ns2ProDevice {
             flash_block(address)
         }
     }
+    /// The next input report, in the format (0x05 or 0x09) the host selected.
     pub fn interrupt_in(&mut self, sample: &InputSample) -> [u8; 64] {
         self.report_for(self.report, sample)
     }
@@ -105,6 +120,7 @@ impl Ns2ProDevice {
         }
         b
     }
+    /// Decodes a rumble report from the host.
     pub fn interrupt_out(&mut self, data: &[u8]) -> Option<Output> {
         let p = match data.split_first() {
             Some((&2, report)) => report,
@@ -118,6 +134,8 @@ impl Ns2ProDevice {
             right: *right,
         })
     }
+    /// Handles a host command, queues its bulk response, and returns any request
+    /// for the physical controller.
     pub fn bulk_out(&mut self, out: &[u8]) -> Option<Output> {
         let &[cmd, _, seq, sub, _, _, _, _, ..] = out else {
             return None;
@@ -186,6 +204,7 @@ impl Ns2ProDevice {
         self.bulk.push_back(r);
         event
     }
+    /// Takes the whole next queued bulk response.
     pub fn pop_bulk_in(&mut self) -> Option<Vec<u8>> {
         self.read_bulk_in(usize::MAX)
     }
@@ -266,6 +285,8 @@ impl Ns2ProDevice {
         Ok((data, event))
     }
 }
+/// Synthetic SPI flash: a bridge identity at 0x13000, centered factory stick
+/// calibration at 0x13080 and 0x130C0, zeros elsewhere.
 #[must_use]
 pub fn flash_block(address: u32) -> [u8; 64] {
     let mut b = [0; 64];
