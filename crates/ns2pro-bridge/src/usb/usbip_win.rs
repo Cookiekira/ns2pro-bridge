@@ -66,6 +66,7 @@ fn dos_error(status: windows::Win32::Foundation::NTSTATUS) -> i32 {
 /// `cbSize` value for a fixed-size Win32 structure.
 #[expect(
     clippy::cast_possible_truncation,
+    clippy::as_conversions,
     reason = "bounded by the compile-time assertion"
 )]
 const fn cb_size<T>() -> u32 {

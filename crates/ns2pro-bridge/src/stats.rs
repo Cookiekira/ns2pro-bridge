@@ -76,7 +76,9 @@ impl Statistics {
             && let Some((s, t)) = self.arrival
             && s == seq
         {
-            self.latencies[self.cursor] = u64::try_from(t.elapsed().as_nanos()).unwrap_or(u64::MAX);
+            if let Some(slot) = self.latencies.get_mut(self.cursor) {
+                *slot = u64::try_from(t.elapsed().as_nanos()).unwrap_or(u64::MAX);
+            }
             self.cursor = (self.cursor + 1) % SAMPLES;
             self.len = (self.len + 1).min(SAMPLES);
             self.arrival = None;
@@ -84,19 +86,26 @@ impl Statistics {
     }
     #[expect(
         clippy::cast_precision_loss,
+        clippy::as_conversions,
         reason = "rates are approximate diagnostics; counts never approach 2^53"
     )]
     pub fn log(&mut self) {
-        let values = &mut self.sorted[..self.len];
-        values.copy_from_slice(&self.latencies[..self.len]);
+        // len never exceeds SAMPLES, the length of both buffers.
+        let (Some(values), Some(latencies)) = (
+            self.sorted.get_mut(..self.len),
+            self.latencies.get(..self.len),
+        ) else {
+            return;
+        };
+        values.copy_from_slice(latencies);
         values.sort_unstable();
         let values = &*values;
         let p = |percent: usize| {
-            if self.len == 0 {
-                0
-            } else {
-                values[(self.len - 1) * percent / 100]
-            }
+            self.len
+                .checked_sub(1)
+                .and_then(|last| values.get(last * percent / 100))
+                .copied()
+                .unwrap_or(0)
         };
         let secs = self.start.elapsed().as_secs_f64().max(0.001);
         tracing::debug!(
@@ -127,10 +136,6 @@ impl Statistics {
     }
 }
 /// Logs statistics every five seconds until cancelled.
-///
-/// # Panics
-///
-/// If the statistics mutex is poisoned.
 pub async fn diagnostics(
     channels: crate::channels::Channels,
     cancel: tokio_util::sync::CancellationToken,
@@ -139,7 +144,7 @@ pub async fn diagnostics(
     loop {
         tokio::select! {
             () = cancel.cancelled() => return,
-            _ = tick.tick() => channels.stats.lock().unwrap().log(),
+            _ = tick.tick() => crate::sync::lock(&channels.stats).log(),
         }
     }
 }

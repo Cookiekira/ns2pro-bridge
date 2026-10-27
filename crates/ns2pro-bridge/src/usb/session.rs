@@ -27,10 +27,6 @@ async fn read_urb<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<(Urb, Vec<
 /// # Errors
 ///
 /// When reading or writing the USB/IP stream fails or a header is invalid.
-///
-/// # Panics
-///
-/// If the statistics mutex is poisoned. The URB frame stream itself never ends.
 pub async fn serve_urbs<S: AsyncRead + AsyncWrite + Unpin>(
     stream: S,
     channels: Channels,
@@ -82,7 +78,11 @@ pub async fn serve_urbs<S: AsyncRead + AsyncWrite + Unpin>(
                 engine.on_sample(*input.borrow_and_update(), now(), &mut effects);
             }
             frame = frames.next() => {
-                let (u, data) = frame.expect("URB stream is infinite")?;
+                // `unfold` never yields None: read errors are returned as items.
+                let Some(frame) = frame else {
+                    return Ok(());
+                };
+                let (u, data) = frame?;
                 engine.submit(u, &data, now(), &mut effects);
             }
             () = timer => engine.on_keepalive_due(now(), &mut effects),
@@ -96,11 +96,7 @@ pub async fn serve_urbs<S: AsyncRead + AsyncWrite + Unpin>(
             effects.replies.clear();
         }
         if let Some((seq, completions, keepalives)) = effects.take_completion_stats() {
-            channels
-                .stats
-                .lock()
-                .unwrap()
-                .completion(seq, completions, keepalives);
+            crate::sync::lock(&channels.stats).completion(seq, completions, keepalives);
         }
         for output in effects.outputs.drain(..) {
             channels.output(output);

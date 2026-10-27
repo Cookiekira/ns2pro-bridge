@@ -66,7 +66,8 @@ macro_rules! winrt {
 /// Borrows the buffer only during `consume`. The COM buffer and byte-access
 /// interface remain alive for the entire slice lifetime, with no intermediate copy.
 fn with_buffer<T>(buffer: &IBuffer, consume: impl FnOnce(&[u8]) -> T) -> windows::core::Result<T> {
-    let length = buffer.Length()? as usize;
+    let length = usize::try_from(buffer.Length()?)
+        .map_err(|_| windows::core::Error::from_hresult(windows::Win32::Foundation::E_BOUNDS))?;
     if length == 0 {
         return Ok(consume(&[]));
     }
@@ -437,7 +438,7 @@ struct Subscription {
 impl Drop for Subscription {
     fn drop(&mut self) {
         // Wait for an in-flight callback before releasing the session sink.
-        self.sink.lock().unwrap_or_else(|e| e.into_inner()).take();
+        crate::sync::lock(&self.sink).take();
         let _ = self.characteristic.RemoveValueChanged(self.token);
     }
 }
@@ -530,8 +531,7 @@ impl GattLink for WindowsGattLink {
                     let result = (|| {
                         if let Some(args) = args.as_ref() {
                             with_buffer(&args.CharacteristicValue()?, |bytes| {
-                                let mut slot =
-                                    callback_sink.lock().unwrap_or_else(|e| e.into_inner());
+                                let mut slot = crate::sync::lock(&callback_sink);
                                 if !closed.is_cancelled()
                                     && let Some(sink) = slot.as_mut()
                                 {

@@ -44,10 +44,10 @@ impl<'a, L: GattLink> Connection<'a, L> {
     }
     pub(crate) fn established(&self) {
         let report = self.link.connection_report();
-        self.channels.stats.lock().unwrap().connected(report);
+        crate::sync::lock(&self.channels.stats).connected(report);
     }
     pub(crate) async fn disconnect(self) {
-        self.channels.stats.lock().unwrap().disconnected();
+        crate::sync::lock(&self.channels.stats).disconnected();
         // Revoke callbacks before taking the watch lock for the final neutral sample.
         // Input callbacks check this same token under that lock.
         self.link.closed().cancel();
@@ -89,11 +89,14 @@ impl<'a, L: GattLink> Controller<'a, L> {
         // Exclusive ownership serializes commands without a runtime lock.
         let responses = &mut self.responses;
         while responses.try_recv().is_ok() {}
+        let &[cmd, _, _, sub, ..] = request else {
+            return Err(LinkError::Platform("malformed controller command".into()).into());
+        };
         let closed = self.link.closed();
         let transaction = async {
             self.link.write(Characteristic::Command, request).await?;
             let response = responses.recv().await.ok_or(LinkError::Closed)?;
-            command::response_payload(&response, request[0], request[3])?;
+            command::response_payload(&response, cmd, sub)?;
             Ok(response)
         };
         tokio::select! {
@@ -109,10 +112,6 @@ impl<'a, L: GattLink> Controller<'a, L> {
     /// # Errors
     ///
     /// When an LED or feature command fails or the input subscription fails.
-    ///
-    /// # Panics
-    ///
-    /// If an input callback finds the statistics mutex is poisoned.
     pub async fn initialize(
         &mut self,
         channels: &Channels,
@@ -139,9 +138,9 @@ impl<'a, L: GattLink> Controller<'a, L> {
                 }
             }
         }
-        if blocks.len() == 3 {
-            calibration = Calibration::from_blocks(&blocks[0], &blocks[1], Some(&blocks[2]))
-                .unwrap_or_default();
+        if let [primary, secondary, user] = blocks.as_slice() {
+            calibration =
+                Calibration::from_blocks(primary, secondary, Some(user)).unwrap_or_default();
         }
         let identity = match self
             .command(&command::spi_read(0x13000, 0x40))
@@ -179,11 +178,12 @@ impl<'a, L: GattLink> Controller<'a, L> {
                                 sample.seq = sample.seq.wrapping_add(1);
                                 #[expect(
                                     clippy::cast_possible_truncation,
+                                    clippy::as_conversions,
                                     reason = "motion timestamp is a wrapping 32-bit microsecond counter"
                                 )]
                                 let timestamp = origin.elapsed().as_micros() as u32;
                                 sample.motion_timestamp_us = timestamp;
-                                channels.stats.lock().unwrap().receipt(sample.seq);
+                                crate::sync::lock(&channels.stats).receipt(sample.seq);
                             });
                         }
                         Err(error) => tracing::warn!(%error,"discarding malformed input"),
@@ -215,10 +215,6 @@ impl<'a, L: GattLink> Controller<'a, L> {
     /// # Errors
     ///
     /// Always: [`ControllerError::Cancelled`], or the link failure that ended it.
-    ///
-    /// # Panics
-    ///
-    /// If the statistics mutex is poisoned.
     pub async fn run(
         &mut self,
         channels: &Channels,
@@ -242,7 +238,7 @@ impl<'a, L: GattLink> Controller<'a, L> {
                         &command::rumble_packet(&v.left, &v.right),
                     )
                     .await?;
-                    channels.stats.lock().unwrap().rumble_written();
+                    crate::sync::lock(&channels.stats).rumble_written();
                     next = tokio::time::Instant::now() + Duration::from_millis(20);
                 }
                 rumble.changed().await.map_err(|_| LinkError::Closed)?;

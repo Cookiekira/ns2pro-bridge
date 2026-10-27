@@ -45,7 +45,7 @@ impl Shared {
     fn close(&self) {
         self.closed.cancel();
         self.socket.shutdown();
-        self.pending.lock().unwrap().take();
+        crate::sync::lock(&self.pending).take();
     }
     async fn transact(&self, p: &[u8]) -> Result<Vec<u8>, LinkError> {
         // A cancelled or timed out ATT transaction poisons this untagged protocol.
@@ -60,7 +60,7 @@ impl Shared {
         }
         let _transaction = self.transaction.lock().await;
         let (tx, rx) = oneshot::channel();
-        *self.pending.lock().unwrap() = Some(tx);
+        *crate::sync::lock(&self.pending) = Some(tx);
         let mut guard = Guard(self, true);
         self.send(p).await?;
         let result = tokio::select! {
@@ -133,7 +133,7 @@ impl AttLink {
 impl Drop for AttLink {
     fn drop(&mut self) {
         self.shared.close();
-        let reader = self.reader.lock().unwrap().take();
+        let reader = crate::sync::lock(&self.reader).take();
         if let Some(task) = reader {
             task.abort();
         }
@@ -162,7 +162,7 @@ impl GattLink for AttLink {
             .cccd
             .ok_or_else(|| LinkError::Platform(format!("missing CCCD {c:?}")))?;
         {
-            let mut sinks = self.shared.sinks.lock().unwrap();
+            let mut sinks = crate::sync::lock(&self.shared.sinks);
             sinks.retain(|(handle, _)| *handle != h.value);
             sinks.push((h.value, sink));
         }
@@ -185,7 +185,7 @@ impl GattLink for AttLink {
     }
     async fn close(&self) {
         self.shared.close();
-        let task = self.reader.lock().unwrap().take();
+        let task = crate::sync::lock(&self.reader).take();
         if let Some(task) = task {
             let _ = task.await;
         }
@@ -202,7 +202,8 @@ async fn read_loop(shared: &Shared) {
                 Ok(n) => n,
             },
         };
-        let packet = match att::classify(&buffer[..count]) {
+        let received = buffer.get(..count).ok_or(att::AttError::Malformed);
+        let packet = match received.and_then(att::classify) {
             Ok(p) => p,
             Err(e) => {
                 tracing::debug!(%e,"malformed ATT packet");
@@ -216,7 +217,7 @@ async fn read_loop(shared: &Shared) {
                 indication,
             } => {
                 {
-                    let mut sinks = shared.sinks.lock().unwrap();
+                    let mut sinks = crate::sync::lock(&shared.sinks);
                     if let Some((_, sink)) = sinks.iter_mut().find(|(h, _)| *h == handle) {
                         sink(value);
                     }
@@ -236,7 +237,7 @@ async fn read_loop(shared: &Shared) {
                 Some(att::error_response(opcode, handle, att::REQUEST_NOT_SUPPORTED).to_vec())
             }
             Packet::Response(p) => {
-                let pending = shared.pending.lock().unwrap().take();
+                let pending = crate::sync::lock(&shared.pending).take();
                 if let Some(tx) = pending {
                     let _ = tx.send(p.to_vec());
                 } else {
@@ -340,7 +341,7 @@ mod tests {
                     0x52 => {
                         assert_eq!(n, 247);
                         assert!(p[3..].iter().all(|b| *b == 0xa5));
-                        let seq = u16::from_le_bytes([p[1], p[2]]) as usize;
+                        let seq = usize::from(u16::from_le_bytes([p[1], p[2]]));
                         assert!(!seen[seq]);
                         seen[seq] = true;
                     }

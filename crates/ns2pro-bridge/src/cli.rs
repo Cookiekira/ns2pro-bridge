@@ -43,6 +43,10 @@ fn default_cache() -> PathBuf {
     PathBuf::from("/var/lib/ns2pro-bridge/controller-cache.json")
 }
 #[cfg(windows)]
+#[expect(
+    clippy::expect_used,
+    reason = "a clap default cannot fail gracefully; Windows always defines LOCALAPPDATA"
+)]
 fn default_cache() -> PathBuf {
     dirs::data_local_dir()
         .expect("local data directory unavailable")

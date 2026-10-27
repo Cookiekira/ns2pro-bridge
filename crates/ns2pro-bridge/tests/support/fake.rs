@@ -1,4 +1,11 @@
 //! Test-only external controller and persistence fixtures.
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    reason = "test fixture: a broken scenario should panic and fail the test"
+)]
 use clap::Parser;
 use ns2pro_bridge::{
     ble::{

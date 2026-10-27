@@ -106,7 +106,7 @@ impl Connection {
                 Ok(0) => return Err(io::Error::other("HCI observer closed")),
                 Ok(n) => {
                     // Queued command statuses precede our request and are ignored.
-                    self.observe(&p[..n])?;
+                    self.observe(received(p, n)?)?;
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(()),
                 Err(e) => return Err(e),
@@ -245,7 +245,7 @@ async fn request_inner(
         if n == 0 {
             return Err(io::Error::other("HCI observer closed"));
         }
-        let step = connection.observe(&p[..n])?;
+        let step = connection.observe(received(&p, n)?)?;
         if let Step::Refused(status) = step {
             report.preference = PreferenceOutcome::Refused;
             return Err(io::Error::other(format!(
@@ -270,6 +270,11 @@ async fn request_inner(
     }
 }
 
+/// The `n` bytes a receive call reported; `recv` never reports more than it was given.
+fn received(p: &[u8], n: usize) -> io::Result<&[u8]> {
+    p.get(..n)
+        .ok_or_else(|| io::Error::other("HCI packet exceeds receive buffer"))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
