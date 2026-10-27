@@ -1,3 +1,4 @@
+//! Native Switch 2 Pro Controller BLE to USB bridge.
 use clap::Parser;
 use ns2pro_bridge::{app, cli::Options};
 #[cfg(target_os = "linux")]

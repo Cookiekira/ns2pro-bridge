@@ -1,13 +1,13 @@
 //! Best-effort runtime-thread priority, restored on the same thread at scope exit.
 use std::{io, marker::PhantomData, rc::Rc};
 #[derive(Debug)]
-pub struct PriorityGuard {
+pub(crate) struct PriorityGuard {
     previous_policy: i32,
     previous: libc::sched_param,
     _thread: PhantomData<Rc<()>>,
 }
 impl PriorityGuard {
-    pub fn try_raise() -> Option<Self> {
+    pub(crate) fn try_raise() -> Option<Self> {
         match Self::raise() {
             Ok(guard) => Some(guard),
             Err(e) => {

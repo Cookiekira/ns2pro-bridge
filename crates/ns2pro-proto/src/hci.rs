@@ -1,20 +1,27 @@
 //! HCI LE connection wire format (little endian, independent of I/O).
 use std::io;
 
+/// Parameters for an LE Connection Update request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConnectionParameters {
+    /// Minimum connection interval, in 1.25 ms units.
     pub min: u16,
+    /// Maximum connection interval, in 1.25 ms units.
     pub max: u16,
+    /// Peripheral latency, in connection events.
     pub latency: u16,
+    /// Supervision timeout, in 10 ms units.
     pub timeout: u16,
 }
 impl ConnectionParameters {
+    /// 7.5 ms interval, no peripheral latency, 2 s supervision timeout.
     pub const LOW_LATENCY: Self = Self {
         min: 6,
         max: 6,
         latency: 0,
         timeout: 200,
     };
+    /// The minimum interval in milliseconds.
     #[must_use]
     pub fn interval_ms(self) -> f64 {
         f64::from(self.min) * 1.25
@@ -35,10 +42,14 @@ impl ConnectionParameters {
     }
 }
 
+/// Connection parameters reported by the controller.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Parameters {
+    /// Connection interval, in 1.25 ms units (6..=3200).
     pub interval: u16,
+    /// Peripheral latency, in connection events (0..=499).
     pub latency: u16,
+    /// Supervision timeout, in 10 ms units (10..=3200).
     pub supervision: u16,
 }
 impl Parameters {
@@ -61,18 +72,29 @@ impl Parameters {
     }
 }
 
+/// The HCI events the bridge observes.
 #[derive(Debug)]
 pub enum Event<'a> {
+    /// LE Connection Complete (legacy, enhanced or enhanced v2) with success status.
     Connected {
+        /// Connection handle.
         handle: u16,
+        /// 0 when the local controller is central, 1 when peripheral.
         role: u8,
+        /// HCI peer address type.
         address_type: u8,
+        /// Peer address, least significant byte first.
         address: &'a [u8],
+        /// Initial connection parameters.
         parameters: Parameters,
     },
+    /// Disconnection Complete with success status, for this handle.
     Disconnected(u16),
+    /// LE Connection Update Complete: handle, status, and the new parameters on success.
     Updated(u16, u8, Option<Parameters>),
+    /// Command Status or Command Complete for LE Connection Update, carrying its status.
     CommandStatus(u8),
+    /// Any other event, including a failed LE Connection Complete.
     Other,
 }
 /// Parses an HCI event packet, including its `0x04` packet indicator.

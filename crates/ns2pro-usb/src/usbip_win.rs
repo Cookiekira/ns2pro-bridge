@@ -2,19 +2,28 @@
 //! Deliberately encoded as bytes: no Rust struct padding is sent to the driver.
 use std::net::SocketAddr;
 
+/// usbip-win2 plugin-hardware IOCTL code.
 pub const PLUGIN_HARDWARE: u32 = 0x0022_e000;
+/// usbip-win2 plugout-hardware IOCTL code.
 pub const PLUGOUT_HARDWARE: u32 = 0x0022_e004;
 #[cfg(test)]
 const PLUGIN_SIZE: usize = 1100;
+/// Bytes of a plugin response up to and including the assigned port.
 pub const PORT_END: usize = 8;
+/// Released usbip-win2 request layouts.
 #[derive(Clone, Copy, Debug)]
 pub enum Abi {
+    /// 1,124-byte layout of v.0.9.8.1, with low-latency receive mode.
     V0981,
+    /// 1,116-byte layout named for v.0.9.7.8.
     V0978,
+    /// 1,100-byte layout named for v.0.9.7.7.
     V0977,
 }
 impl Abi {
+    /// All supported layouts, newest first; attach tries them in this order.
     pub const SUPPORTED: [Self; 3] = [Self::V0981, Self::V0978, Self::V0977];
+    /// Plugin request size in bytes.
     #[must_use]
     #[expect(
         clippy::as_conversions,
@@ -38,11 +47,21 @@ impl Abi {
     }
 }
 
+/// A usbip-win2 request that cannot be encoded, or an unusable response.
 #[derive(Debug, PartialEq, Eq)]
 pub enum WireError {
+    /// The listener port is 0.
     ZeroPort,
+    /// The host address is unspecified.
     InvalidHost,
-    InvalidResponse { bytes: u32, port: i32 },
+    /// A plugin response with the wrong size or a non-positive port, or a
+    /// non-positive port passed to [`plugout`].
+    InvalidResponse {
+        /// Response size in bytes (8 for a rejected [`plugout`] port).
+        bytes: u32,
+        /// The offending port.
+        port: i32,
+    },
 }
 impl std::fmt::Display for WireError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

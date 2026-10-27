@@ -9,30 +9,54 @@ use crate::calibration::{Calibration, StickCalibration};
 pub struct Buttons(pub u32);
 
 impl Buttons {
+    /// No buttons.
     pub const NONE: Self = Self(0);
+    /// B face button.
     pub const B: Self = Self(1 << 0);
+    /// A face button.
     pub const A: Self = Self(1 << 1);
+    /// Y face button.
     pub const Y: Self = Self(1 << 2);
+    /// X face button.
     pub const X: Self = Self(1 << 3);
+    /// R shoulder button.
     pub const R: Self = Self(1 << 4);
+    /// ZR trigger.
     pub const ZR: Self = Self(1 << 5);
+    /// Plus button.
     pub const PLUS: Self = Self(1 << 6);
+    /// Right stick click.
     pub const RIGHT_STICK: Self = Self(1 << 7);
+    /// D-pad down.
     pub const DOWN: Self = Self(1 << 8);
+    /// D-pad right.
     pub const RIGHT: Self = Self(1 << 9);
+    /// D-pad left.
     pub const LEFT: Self = Self(1 << 10);
+    /// D-pad up.
     pub const UP: Self = Self(1 << 11);
+    /// L shoulder button.
     pub const L: Self = Self(1 << 12);
+    /// ZL trigger.
     pub const ZL: Self = Self(1 << 13);
+    /// Minus button.
     pub const MINUS: Self = Self(1 << 14);
+    /// Left stick click.
     pub const LEFT_STICK: Self = Self(1 << 15);
+    /// Home button.
     pub const HOME: Self = Self(1 << 16);
+    /// Capture button.
     pub const CAPTURE: Self = Self(1 << 17);
+    /// GR rear grip button.
     pub const GR: Self = Self(1 << 18);
+    /// GL rear grip button.
     pub const GL: Self = Self(1 << 19);
+    /// C button.
     pub const C: Self = Self(1 << 20);
+    /// Headset connected; reported as a button bit.
     pub const HEADSET: Self = Self(1 << 21);
 
+    /// Whether every button in `other` is pressed.
     #[must_use]
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
@@ -76,6 +100,7 @@ pub const COMMON_BUTTON_LAYOUT: [ButtonBit; 22] = [
     (Buttons::HEADSET, 3, 0x10),
 ];
 
+/// Reads `layout`'s buttons from `raw`; bytes beyond `raw` read as released.
 #[must_use]
 pub fn decode_buttons(raw: &[u8], layout: &[ButtonBit]) -> Buttons {
     layout
@@ -96,18 +121,26 @@ pub fn encode_buttons(buttons: Buttons, layout: &[ButtonBit], out: &mut [u8]) {
     }
 }
 
+/// Smallest 12-bit stick value.
 pub const STICK_MIN: u16 = 0;
+/// 12-bit stick value at rest.
 pub const STICK_CENTER: u16 = 0x0800;
+/// Largest 12-bit stick value.
 pub const STICK_MAX: u16 = 0x0FFF;
+/// Battery level when full.
 pub const BATTERY_MAX: u8 = 9;
 
+/// One stick position, 12 bits per axis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Stick {
+    /// Horizontal axis, `STICK_MIN..=STICK_MAX`.
     pub x: u16,
+    /// Vertical axis, `STICK_MIN..=STICK_MAX`.
     pub y: u16,
 }
 
 impl Stick {
+    /// Both axes at rest.
     pub const CENTER: Self = Self {
         x: STICK_CENTER,
         y: STICK_CENTER,
@@ -133,10 +166,14 @@ pub fn pack_stick12(x: u16, y: u16) -> [u8; 3] {
     [x_lo, (x_hi & 0x0F) | y_lo, y_hi]
 }
 
+/// Decoded controller input, as forwarded to the virtual USB device.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InputState {
+    /// Pressed buttons.
     pub buttons: Buttons,
+    /// Left stick, normalized with calibration when available.
     pub left_stick: Stick,
+    /// Right stick, normalized with calibration when available.
     pub right_stick: Stick,
     /// Accelerometer X, Y, Z.
     pub accel: [i16; 3],
@@ -144,7 +181,9 @@ pub struct InputState {
     pub gyro: [i16; 3],
     /// 0..=9.
     pub battery_level: u8,
+    /// The battery is charging.
     pub charging: bool,
+    /// Reported to the host as external power; [`parse_common_report`] always sets it.
     pub external_power: bool,
 }
 
@@ -164,6 +203,7 @@ impl Default for InputState {
     }
 }
 
+/// A common report shorter than its 16-byte button and stick block; carries the length.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("short common report: {0} bytes")]
 pub struct ShortReport(pub usize);

@@ -2,6 +2,7 @@
 use std::time::{Duration, Instant};
 
 const SAMPLES: usize = 4096;
+/// Bridge latency and throughput diagnostics, kept across reconnects.
 #[derive(Debug)]
 pub struct Statistics {
     connection: crate::ble::ConnectionReport,
@@ -44,19 +45,24 @@ impl Default for Statistics {
     }
 }
 impl Statistics {
+    /// Records the report for a new connection.
     pub const fn connected(&mut self, report: crate::ble::ConnectionReport) {
         self.connection = report;
     }
+    /// Clears the connection report; measurements are kept.
     pub fn disconnected(&mut self) {
         self.connection = crate::ble::ConnectionReport::default();
     }
+    /// The current connection report.
     #[must_use]
     pub const fn connection_report(&self) -> crate::ble::ConnectionReport {
         self.connection
     }
+    /// Counts one rumble write to the controller.
     pub const fn rumble_written(&mut self) {
         self.rumble_writes += 1;
     }
+    /// Records the arrival of input `seq`.
     pub fn receipt(&mut self, seq: u64) {
         let now = Instant::now();
         if let Some(last) = self.last {
@@ -69,6 +75,7 @@ impl Statistics {
         self.arrival = Some((seq, now));
         self.reports += 1;
     }
+    /// Counts USB completions, and measures latency when they delivered input `seq`.
     pub fn completion(&mut self, seq: u64, inputs: u64, keepalives: u64) {
         self.urbs += inputs;
         self.keepalives += keepalives;
@@ -84,6 +91,7 @@ impl Statistics {
             self.arrival = None;
         }
     }
+    /// Logs a summary at debug level.
     #[expect(
         clippy::cast_precision_loss,
         clippy::as_conversions,

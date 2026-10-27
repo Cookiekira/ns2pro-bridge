@@ -2,6 +2,7 @@
 
 use uuid::Uuid;
 
+/// A controller GATT characteristic used by the bridge.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Characteristic {
     /// Written once with `[0x01, 0x00]` to start the session.
@@ -17,6 +18,7 @@ pub enum Characteristic {
 }
 
 impl Characteristic {
+    /// Every characteristic; discovery fails unless all are found.
     pub const ALL: [Self; 5] = [
         Self::Init,
         Self::Input,
@@ -28,6 +30,7 @@ impl Characteristic {
     /// Characteristics the bridge subscribes to.
     pub const NOTIFYING: [Self; 2] = [Self::Input, Self::CommandResponse];
 
+    /// The characteristic's 128-bit UUID.
     #[must_use]
     pub const fn uuid(self) -> Uuid {
         match self {
@@ -39,6 +42,7 @@ impl Characteristic {
         }
     }
 
+    /// Inverse of [`Self::uuid`]; `None` for characteristics the bridge does not use.
     #[must_use]
     pub fn from_uuid(uuid: Uuid) -> Option<Self> {
         Self::ALL.into_iter().find(|c| c.uuid() == uuid)

@@ -1,3 +1,5 @@
+//! Remembers the last controller so later runs target it. A fresh advertisement
+//! is still required before connecting.
 use crate::{ble::BleError, session::SessionError};
 use ns2pro_proto::Address;
 use serde::{Deserialize, Serialize};
@@ -5,8 +7,10 @@ use std::{
     io,
     path::{Path, PathBuf},
 };
+/// The controller cache file.
 #[derive(Debug, Clone)]
 pub struct Cache(PathBuf);
+/// The address chosen for one connection attempt, and whether it came from the cache.
 #[derive(Debug)]
 pub struct Selection<'a> {
     cache: &'a Cache,
@@ -18,10 +22,13 @@ struct Entry {
     address: String,
 }
 impl Cache {
+    /// A cache stored at `path`; nothing is read until it is used.
     #[must_use]
     pub const fn new(path: PathBuf) -> Self {
         Self(path)
     }
+    /// Chooses `explicit`, else the cached address. An unreadable cache is logged
+    /// and treated as empty.
     #[must_use]
     pub fn select(&self, explicit: Option<Address>) -> Selection<'_> {
         let cached = self.load().unwrap_or_else(|e| {
@@ -83,6 +90,7 @@ impl Cache {
     }
 }
 impl Selection<'_> {
+    /// The chosen address, or `None` to accept any controller.
     #[must_use]
     pub const fn address(&self) -> Option<Address> {
         self.address

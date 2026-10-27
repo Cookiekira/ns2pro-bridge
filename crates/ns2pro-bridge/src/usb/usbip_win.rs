@@ -292,6 +292,8 @@ fn detach_port(handle: &OwnedHandle, port: i32) -> Result<(), AttachError> {
     Ok(())
 }
 
+/// A device imported into usbip-win2; a blocking worker holds the port until
+/// [`Self::detach`] or drop.
 #[derive(Debug)]
 pub struct Attached {
     stop: CancellationToken,

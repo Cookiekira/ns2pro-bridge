@@ -5,12 +5,18 @@ use std::{future::Future, io};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
+/// Failure of the virtual USB device's transport.
 #[derive(Debug)]
 pub enum Error {
+    /// The listener or driver could not be prepared.
     Setup(io::Error),
+    /// Serving USB/IP failed.
     Transport(io::Error),
+    /// Attaching or releasing the virtual device failed.
     Attach(AttachError),
 }
+/// The virtual USB device's transport: a USB/IP listener, the Linux vhci driver,
+/// or usbip-win2.
 #[derive(Debug)]
 pub struct Attachment {
     mode: Mode,

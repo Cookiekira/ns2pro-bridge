@@ -2,14 +2,19 @@
 
 use std::fmt::Write as _;
 
+/// Feature flag for button reports.
 pub const FEATURE_BUTTONS: u8 = 0x01;
+/// Feature flag for stick reports.
 pub const FEATURE_STICKS: u8 = 0x02;
+/// Feature flag for accelerometer and gyroscope reports.
 pub const FEATURE_IMU: u8 = 0x04;
+/// Buttons, sticks and IMU.
 pub const DEFAULT_FEATURE_FLAGS: u8 = FEATURE_BUTTONS | FEATURE_STICKS | FEATURE_IMU;
 
 /// Player LED pattern applied when the host has not chosen one.
 pub const DEFAULT_LED_PATTERN: u8 = 0x06;
 
+/// Length of a [`rumble_packet`].
 pub const RUMBLE_PACKET_LEN: usize = 42;
 
 /// `[cmd, 0x91, seq, sub, 0, len, 0, 0, payload..]`.
@@ -29,14 +34,24 @@ pub fn command(cmd: u8, sub: u8, payload: &[u8]) -> Vec<u8> {
     out
 }
 
+/// A controller command response that cannot be used.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ResponseError {
+    /// Shorter than the 8-byte header; carries the response.
     #[error("short controller response: {}", hex(.0))]
     Short(Vec<u8>),
+    /// Answers a different command or subcommand; carries the response.
     #[error("unexpected controller response: {}", hex(.0))]
     Unexpected(Vec<u8>),
+    /// An SPI read returned data for another flash address.
     #[error("SPI read for 0x{want:X} returned 0x{got:X}")]
-    SpiAddress { want: u32, got: u32 },
+    SpiAddress {
+        /// Address that was requested.
+        want: u32,
+        /// Address the reply carries.
+        got: u32,
+    },
+    /// An SPI reply is shorter than its header or its declared data length.
     #[error("short SPI payload")]
     ShortSpi,
 }
@@ -66,6 +81,7 @@ pub fn response_payload(response: &[u8], cmd: u8, sub: u8) -> Result<&[u8], Resp
     Ok(payload)
 }
 
+/// Builds a command that sets the player LEDs to `mask`.
 #[must_use]
 pub fn set_player_leds(mask: u8) -> Vec<u8> {
     command(0x09, 0x07, &[mask, 0, 0, 0, 0, 0, 0, 0])
@@ -77,11 +93,14 @@ pub fn set_feature_mask(mask: u8) -> Vec<u8> {
     command(0x0C, 0x02, &[mask, 0, 0, 0])
 }
 
+/// Builds a command enabling the reports in `flags`, limited by any
+/// [`set_feature_mask`] mask.
 #[must_use]
 pub fn enable_features(flags: u8) -> Vec<u8> {
     command(0x0C, 0x04, &[flags, 0, 0, 0])
 }
 
+/// Builds a command reading `size` bytes of SPI flash at `address`.
 #[must_use]
 pub fn spi_read(address: u32, size: u8) -> Vec<u8> {
     let mut payload = [0u8; 8];

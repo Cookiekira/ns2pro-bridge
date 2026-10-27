@@ -1,3 +1,4 @@
+//! Golden USB/IP and report fixtures exported from VIIPER.
 use ns2pro_proto::{Buttons, Stick};
 use ns2pro_usb::{usbip::*, *};
 use serde_json::Value;
