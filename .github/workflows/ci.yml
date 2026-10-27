@@ -60,7 +60,8 @@ jobs:
         env:
           CARGO_BUILD_WARNINGS: deny
       - run: cargo test --locked --workspace
-  # Verifies the `rust-version` promise in Cargo.toml.
+  # Verifies the `rust-version` promise in Cargo.toml. Cargo 1.88 predates
+  # `build.warnings`, so warnings are denied through RUSTFLAGS here.
   msrv:
     strategy:
       fail-fast: false
@@ -69,6 +70,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       RUSTUP_TOOLCHAIN: "1.88"
+      RUSTFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@1.88
