@@ -86,6 +86,12 @@ pub async fn attempt<B: Bluetooth>(
         result,
     }
 }
+/// Connects, pairs when requested and reconnects until cancelled.
+///
+/// # Errors
+///
+/// [`SessionError::Cancelled`] on shutdown, or the first non-retryable
+/// Bluetooth, controller or cache failure.
 pub async fn supervise<B: Bluetooth>(
     bluetooth: &B,
     options: &Options,

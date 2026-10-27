@@ -2,6 +2,10 @@ use clap::Parser;
 use ns2pro_proto::Address;
 use std::path::PathBuf;
 #[derive(Clone, Debug, Parser)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each bool is an independent command-line flag"
+)]
 #[command(version, about = "Native Switch 2 Pro BLE to USB bridge")]
 pub struct Options {
     /// USB/IP listen address (HOST:PORT) for manual Linux and Windows serving
@@ -45,12 +49,10 @@ fn default_cache() -> PathBuf {
         .join("ns2pro-bridge/controller-cache.json")
 }
 fn parse_flags(s: &str) -> Result<u8, String> {
-    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        u8::from_str_radix(hex, 16)
-    } else {
-        s.parse()
-    }
-    .map_err(|e| e.to_string())
+    s.strip_prefix("0x")
+        .or_else(|| s.strip_prefix("0X"))
+        .map_or_else(|| s.parse(), |hex| u8::from_str_radix(hex, 16))
+        .map_err(|e| e.to_string())
 }
 
 fn parse_usb_addr(s: &str) -> Result<String, String> {

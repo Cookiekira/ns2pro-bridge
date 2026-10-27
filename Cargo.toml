@@ -49,6 +49,8 @@ future_not_send = "allow"
 multiple_crate_versions = "allow"
 # Conflicts with rustc `unreachable_pub`, which this workspace enables instead.
 redundant_pub_crate = "allow"
+# `async fn` trait impls defer side effects to first poll; `ready()` would run them eagerly.
+unused_async_trait_impl = "allow"
 # Curated restriction lints; the group as a whole is self-contradictory.
 allow_attributes = "warn"
 allow_attributes_without_reason = "warn"

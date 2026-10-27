@@ -65,6 +65,11 @@ impl<L: GattLink> std::fmt::Debug for Controller<'_, L> {
     }
 }
 impl<'a, L: GattLink> Controller<'a, L> {
+    /// Sends the init payload and subscribes to command responses.
+    ///
+    /// # Errors
+    ///
+    /// [`ControllerError::Link`] when either GATT operation fails.
     pub async fn new(link: &'a L) -> Result<Self, ControllerError> {
         let (tx, rx) = mpsc::channel(8);
         link.write(Characteristic::Init, &INIT_PAYLOAD).await?;
@@ -98,6 +103,16 @@ impl<'a, L: GattLink> Controller<'a, L> {
             }
         }
     }
+    /// Applies LEDs, reads calibration and identity, enables `flags` and starts
+    /// publishing input. Calibration and identity failures fall back to defaults.
+    ///
+    /// # Errors
+    ///
+    /// When an LED or feature command fails or the input subscription fails.
+    ///
+    /// # Panics
+    ///
+    /// If an input callback finds the statistics mutex is poisoned.
     pub async fn initialize(
         &mut self,
         channels: &Channels,
@@ -162,7 +177,12 @@ impl<'a, L: GattLink> Controller<'a, L> {
                                 }
                                 sample.state = state;
                                 sample.seq = sample.seq.wrapping_add(1);
-                                sample.motion_timestamp_us = origin.elapsed().as_micros() as u32;
+                                #[expect(
+                                    clippy::cast_possible_truncation,
+                                    reason = "motion timestamp is a wrapping 32-bit microsecond counter"
+                                )]
+                                let timestamp = origin.elapsed().as_micros() as u32;
+                                sample.motion_timestamp_us = timestamp;
                                 channels.stats.lock().unwrap().receipt(sample.seq);
                             });
                         }
@@ -173,6 +193,11 @@ impl<'a, L: GattLink> Controller<'a, L> {
             .await?;
         Ok(())
     }
+    /// Runs the pairing exchange for `host`.
+    ///
+    /// # Errors
+    ///
+    /// On link failure, a rejected stage or an LTK confirmation mismatch.
     pub async fn pair(
         &mut self,
         host: Address,
@@ -185,6 +210,15 @@ impl<'a, L: GattLink> Controller<'a, L> {
         }
         Ok(())
     }
+    /// Forwards rumble and LED changes until cancelled or the link closes.
+    ///
+    /// # Errors
+    ///
+    /// Always: [`ControllerError::Cancelled`], or the link failure that ended it.
+    ///
+    /// # Panics
+    ///
+    /// If the statistics mutex is poisoned.
     pub async fn run(
         &mut self,
         channels: &Channels,
@@ -198,11 +232,10 @@ impl<'a, L: GattLink> Controller<'a, L> {
         let rumble_task = async {
             let mut next = tokio::time::Instant::now();
             loop {
-                let mut value = *rumble.borrow_and_update();
                 if tokio::time::Instant::now() < next {
                     tokio::time::sleep_until(next).await;
-                    value = *rumble.borrow_and_update();
                 }
+                let value = *rumble.borrow_and_update();
                 if let Some(v) = value {
                     link.write(
                         Characteristic::Vibration,

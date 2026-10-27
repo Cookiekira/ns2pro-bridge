@@ -34,6 +34,11 @@ impl Cache {
             from_cache: explicit.is_none() && cached.is_some(),
         }
     }
+    /// Reads the cached controller address; a missing file is `None`.
+    ///
+    /// # Errors
+    ///
+    /// On I/O failure other than a missing file, or when the file is not a valid entry.
     pub fn load(&self) -> Result<Option<Address>, io::Error> {
         match std::fs::read(&self.0) {
             Ok(bytes) => {
@@ -47,6 +52,11 @@ impl Cache {
             Err(e) => Err(e),
         }
     }
+    /// Atomically replaces the cache with `address`.
+    ///
+    /// # Errors
+    ///
+    /// When the directory, temporary file or replacement cannot be written.
     pub fn save(&self, address: Address) -> Result<(), io::Error> {
         if let Some(parent) = self.0.parent().filter(|p| !p.as_os_str().is_empty()) {
             std::fs::create_dir_all(parent)?;
@@ -60,6 +70,11 @@ impl Cache {
         )?;
         replace(&tmp, &self.0)
     }
+    /// Removes the cache; a missing file is not an error.
+    ///
+    /// # Errors
+    ///
+    /// When the file exists but cannot be removed.
     pub fn forget(&self) -> Result<(), io::Error> {
         match std::fs::remove_file(&self.0) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -72,6 +87,11 @@ impl Selection<'_> {
     pub const fn address(&self) -> Option<Address> {
         self.address
     }
+    /// Forgets a cached selection that failed before establishing a session.
+    ///
+    /// # Errors
+    ///
+    /// Returns `result` unchanged.
     pub fn settle(
         self,
         established: bool,

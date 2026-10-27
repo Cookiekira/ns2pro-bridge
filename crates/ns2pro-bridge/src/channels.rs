@@ -56,7 +56,7 @@ impl Channels {
     }
     pub fn neutral(&self) {
         self.input.send_modify(|s| {
-            s.state = Default::default();
+            s.state = ns2pro_proto::InputState::default();
             s.seq = s.seq.wrapping_add(1);
             s.motion_timestamp_us = 0;
         });

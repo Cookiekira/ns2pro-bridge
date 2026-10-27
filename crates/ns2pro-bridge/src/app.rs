@@ -77,16 +77,25 @@ async fn run_session<B: crate::ble::Bluetooth>(
     };
     usb.run(&channels, &cancel, drain).await
 }
+/// Runs the bridge until shutdown is requested or a component fails.
+///
+/// # Errors
+///
+/// The first [`AppError`] from platform setup, Bluetooth, USB attachment or the
+/// session; a clean shutdown returns `Ok`.
 pub async fn run(options: Options) -> Result<(), AppError> {
     let (_guard, bluetooth) = platform::initialize().await?;
     let result = async {
         if options.bt_smoke_test {
-            return bluetooth.smoke_test().await.map_err(AppError::from);
+            // Boxed once at startup: the smoke test and session futures are tens of KiB.
+            return Box::pin(bluetooth.smoke_test())
+                .await
+                .map_err(AppError::from);
         }
         let channels = Channels::default();
         let cancel = CancellationToken::new();
         let usb = usb::Attachment::prepare(&options).await?;
-        run_session(&bluetooth, &options, usb, cancel, channels).await
+        Box::pin(run_session(&bluetooth, &options, usb, cancel, channels)).await
     }
     .await;
     platform::close(&bluetooth).await;
@@ -126,6 +135,10 @@ mod platform {
 mod platform {
     use super::AppError;
     use crate::{ble::windows::WindowsBluetooth, rt::windows::RuntimeGuard};
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "signature shared with the Linux platform module"
+    )]
     pub(super) fn shutdown() -> std::io::Result<impl Future<Output = ()>> {
         Ok(async {
             let _ = tokio::signal::ctrl_c().await;
@@ -137,5 +150,9 @@ mod platform {
         let bluetooth = WindowsBluetooth::new().await?;
         Ok((runtime, bluetooth))
     }
+    #[expect(
+        clippy::unused_async,
+        reason = "signature shared with the Linux platform module"
+    )]
     pub(super) async fn close(_: &WindowsBluetooth) {}
 }
