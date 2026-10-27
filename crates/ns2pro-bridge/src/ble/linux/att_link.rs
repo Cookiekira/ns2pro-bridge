@@ -38,7 +38,7 @@ impl Shared {
         // cannot interleave bytes; only request/reply transactions need a lock.
         tokio::select! {
             biased;
-            _ = self.closed.cancelled() => Err(LinkError::Closed),
+            () = self.closed.cancelled() => Err(LinkError::Closed),
             result = self.socket.send(p) => result.map_err(Into::into),
         }
     }
@@ -48,9 +48,6 @@ impl Shared {
         self.pending.lock().unwrap().take();
     }
     async fn transact(&self, p: &[u8]) -> Result<Vec<u8>, LinkError> {
-        let _transaction = self.transaction.lock().await;
-        let (tx, rx) = oneshot::channel();
-        *self.pending.lock().unwrap() = Some(tx);
         // A cancelled or timed out ATT transaction poisons this untagged protocol.
         // Closing prevents a late reply from being delivered to the next request.
         struct Guard<'a>(&'a Shared, bool);
@@ -61,11 +58,14 @@ impl Shared {
                 }
             }
         }
+        let _transaction = self.transaction.lock().await;
+        let (tx, rx) = oneshot::channel();
+        *self.pending.lock().unwrap() = Some(tx);
         let mut guard = Guard(self, true);
         self.send(p).await?;
         let result = tokio::select! {
             biased;
-            _ = self.closed.cancelled() => return Err(LinkError::Closed),
+            () = self.closed.cancelled() => return Err(LinkError::Closed),
             result = timeout(Duration::from_secs(2), rx) => {
                 result.map_err(|_| LinkError::Timeout)?.map_err(|_| LinkError::Closed)?
             }
@@ -133,7 +133,8 @@ impl AttLink {
 impl Drop for AttLink {
     fn drop(&mut self) {
         self.shared.close();
-        if let Some(task) = self.reader.lock().unwrap().take() {
+        let reader = self.reader.lock().unwrap().take();
+        if let Some(task) = reader {
             task.abort();
         }
     }
@@ -195,7 +196,7 @@ async fn read_loop(shared: &Shared) {
     loop {
         let count = tokio::select! {
             biased;
-            _ = shared.closed.cancelled() => return,
+            () = shared.closed.cancelled() => return,
             result = shared.socket.recv(&mut buffer) => match result {
                 Ok(0) | Err(_) => return,
                 Ok(n) => n,
@@ -235,7 +236,8 @@ async fn read_loop(shared: &Shared) {
                 Some(att::error_response(opcode, handle, att::REQUEST_NOT_SUPPORTED).to_vec())
             }
             Packet::Response(p) => {
-                if let Some(tx) = shared.pending.lock().unwrap().take() {
+                let pending = shared.pending.lock().unwrap().take();
+                if let Some(tx) = pending {
                     let _ = tx.send(p.to_vec());
                 } else {
                     tracing::debug!("unsolicited ATT response");
@@ -290,19 +292,19 @@ mod tests {
     async fn concurrent_writes_keep_packet_boundaries_under_backpressure() {
         let (socket, peer) = super::super::socket::pair();
         let buffer: libc::c_int = 4096;
-        // SAFETY: socket is owned, buffer is readable native integer storage.
-        assert_eq!(
-            unsafe {
-                libc::setsockopt(
-                    socket.fd(),
-                    libc::SOL_SOCKET,
-                    libc::SO_SNDBUF,
-                    (&buffer as *const libc::c_int).cast(),
-                    std::mem::size_of_val(&buffer) as _,
-                )
-            },
-            0
-        );
+        let len = libc::socklen_t::try_from(size_of_val(&buffer)).unwrap();
+        // SAFETY: buffer is an initialized c_int borrowed for the call with its exact
+        // length; the descriptor stays open while socket exists.
+        let result = unsafe {
+            libc::setsockopt(
+                socket.fd(),
+                libc::SOL_SOCKET,
+                libc::SO_SNDBUF,
+                (&raw const buffer).cast(),
+                len,
+            )
+        };
+        assert_eq!(result, 0);
         let shared = Shared::new(socket);
         let completed = std::cell::Cell::new(0);
         let writes = async {
@@ -374,7 +376,7 @@ mod tests {
         let s = shared.clone();
         let reader = tokio::spawn(async move {
             read_loop(&s).await;
-            s.close()
+            s.close();
         });
         let mut p = [0; 32];
         b.send(&[2, 64, 0]).await.unwrap();
@@ -430,7 +432,7 @@ mod tests {
         let reader_shared = shared.clone();
         let reader = tokio::spawn(async move { read_loop(&reader_shared).await });
         let link = AttLink {
-            report: Default::default(),
+            report: crate::ble::ConnectionReport::default(),
             shared,
             handles: vec![Handles {
                 characteristic: Characteristic::Input,
@@ -472,7 +474,7 @@ mod tests {
                     8 if request[1..3] == [1, 0] => {
                         let mut response = vec![9, 21];
                         for (i, c) in Characteristic::ALL.into_iter().enumerate() {
-                            let handle = 2 + i as u16 * 4;
+                            let handle = 2 + u16::try_from(i).unwrap() * 4;
                             response.extend(handle.to_le_bytes());
                             response.push(if Characteristic::NOTIFYING.contains(&c) {
                                 0x10
@@ -490,7 +492,7 @@ mod tests {
                     4 => {
                         let start = u16::from_le_bytes([request[1], request[2]]);
                         assert!([8, 20].contains(&start));
-                        vec![5, 1, start as u8, 0, 2, 0x29]
+                        vec![5, 1, u8::try_from(start).unwrap(), 0, 2, 0x29]
                     }
                     _ => panic!("unexpected discovery request {request:02x?}"),
                 };
@@ -505,7 +507,9 @@ mod tests {
             peer.shutdown();
         };
         let client = async {
-            let link = AttLink::open(socket, Default::default()).await.unwrap();
+            let link = AttLink::open(socket, crate::ble::ConnectionReport::default())
+                .await
+                .unwrap();
             let seen = Arc::new(Mutex::new(Vec::<u8>::new()));
             let copy = seen.clone();
             link.subscribe(

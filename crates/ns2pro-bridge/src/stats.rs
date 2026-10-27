@@ -1,5 +1,7 @@
 //! Bounded, allocation-free latency samples. Measured receipt time is not BLE interval.
 use std::time::{Duration, Instant};
+
+const SAMPLES: usize = 4096;
 #[derive(Debug)]
 pub struct Statistics {
     connection: crate::ble::ConnectionReport,
@@ -13,14 +15,17 @@ pub struct Statistics {
     interval_min: u64,
     interval_max: u64,
     arrival: Option<(u64, Instant)>,
-    latencies: [u64; 4096],
+    /// Ring buffer of the latest `SAMPLES` latencies, allocated once.
+    latencies: Box<[u64]>,
+    /// Sort space for [`Statistics::log`], so logging never allocates.
+    sorted: Box<[u64]>,
     len: usize,
     cursor: usize,
 }
 impl Default for Statistics {
     fn default() -> Self {
         Self {
-            connection: Default::default(),
+            connection: crate::ble::ConnectionReport::default(),
             start: Instant::now(),
             last: None,
             reports: 0,
@@ -31,29 +36,31 @@ impl Default for Statistics {
             interval_min: u64::MAX,
             interval_max: 0,
             arrival: None,
-            latencies: [0; 4096],
+            latencies: vec![0; SAMPLES].into_boxed_slice(),
+            sorted: vec![0; SAMPLES].into_boxed_slice(),
             len: 0,
             cursor: 0,
         }
     }
 }
 impl Statistics {
-    pub fn connected(&mut self, report: crate::ble::ConnectionReport) {
+    pub const fn connected(&mut self, report: crate::ble::ConnectionReport) {
         self.connection = report;
     }
     pub fn disconnected(&mut self) {
-        self.connection = Default::default();
+        self.connection = crate::ble::ConnectionReport::default();
     }
-    pub fn connection_report(&self) -> crate::ble::ConnectionReport {
+    #[must_use]
+    pub const fn connection_report(&self) -> crate::ble::ConnectionReport {
         self.connection
     }
-    pub fn rumble_written(&mut self) {
+    pub const fn rumble_written(&mut self) {
         self.rumble_writes += 1;
     }
     pub fn receipt(&mut self, seq: u64) {
         let now = Instant::now();
         if let Some(last) = self.last {
-            let us = now.duration_since(last).as_micros() as u64;
+            let us = u64::try_from(now.duration_since(last).as_micros()).unwrap_or(u64::MAX);
             self.interval_sum += u128::from(us);
             self.interval_min = self.interval_min.min(us);
             self.interval_max = self.interval_max.max(us);
@@ -69,15 +76,21 @@ impl Statistics {
             && let Some((s, t)) = self.arrival
             && s == seq
         {
-            self.latencies[self.cursor] = t.elapsed().as_nanos() as u64;
-            self.cursor = (self.cursor + 1) % 4096;
-            self.len = (self.len + 1).min(4096);
+            self.latencies[self.cursor] = u64::try_from(t.elapsed().as_nanos()).unwrap_or(u64::MAX);
+            self.cursor = (self.cursor + 1) % SAMPLES;
+            self.len = (self.len + 1).min(SAMPLES);
             self.arrival = None;
         }
     }
-    pub fn log(&self) {
-        let mut values = self.latencies;
-        values[..self.len].sort_unstable();
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "rates are approximate diagnostics; counts never approach 2^53"
+    )]
+    pub fn log(&mut self) {
+        let values = &mut self.sorted[..self.len];
+        values.copy_from_slice(&self.latencies[..self.len]);
+        values.sort_unstable();
+        let values = &*values;
         let p = |percent: usize| {
             if self.len == 0 {
                 0
@@ -95,7 +108,7 @@ impl Statistics {
             },
             interarrival_max_us = self.interval_max,
             interarrival_mean_us = if self.reports > 1 {
-                self.interval_sum / (self.reports - 1) as u128
+                self.interval_sum / u128::from(self.reports - 1)
             } else {
                 0
             },
@@ -108,13 +121,16 @@ impl Statistics {
             preference_result = ?self.connection.preference,
             observed_interval_ms = %self
                 .connection
-                .observed_interval
-                .map(|units| (f64::from(units) * 1.25).to_string())
-                .unwrap_or_else(|| "unknown".into()),
+                .observed_interval.map_or_else(|| "unknown".into(), |units| (f64::from(units) * 1.25).to_string()),
             "bridge statistics (receipt to completed socket write; excludes BLE and host)"
         );
     }
 }
+/// Logs statistics every five seconds until cancelled.
+///
+/// # Panics
+///
+/// If the statistics mutex is poisoned.
 pub async fn diagnostics(
     channels: crate::channels::Channels,
     cancel: tokio_util::sync::CancellationToken,
@@ -122,7 +138,7 @@ pub async fn diagnostics(
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     loop {
         tokio::select! {
-            _ = cancel.cancelled() => return,
+            () = cancel.cancelled() => return,
             _ = tick.tick() => channels.stats.lock().unwrap().log(),
         }
     }
@@ -170,7 +186,8 @@ mod tests {
         let first = stats.last.unwrap();
         assert_eq!(stats.interval_sum, 0);
         stats.receipt(2);
-        let interval = stats.last.unwrap().duration_since(first).as_micros() as u64;
+        let interval =
+            u64::try_from(stats.last.unwrap().duration_since(first).as_micros()).unwrap();
         assert_eq!(stats.reports, 2);
         assert_eq!(stats.interval_sum, u128::from(interval));
         assert_eq!(stats.interval_min, interval);

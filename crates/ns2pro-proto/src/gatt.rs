@@ -28,6 +28,7 @@ impl Characteristic {
     /// Characteristics the bridge subscribes to.
     pub const NOTIFYING: [Self; 2] = [Self::Input, Self::CommandResponse];
 
+    #[must_use]
     pub const fn uuid(self) -> Uuid {
         match self {
             Self::Init => Uuid::from_u128(0x00c5af5d_1964_4e30_8f51_1956f96bd282),
@@ -38,6 +39,7 @@ impl Characteristic {
         }
     }
 
+    #[must_use]
     pub fn from_uuid(uuid: Uuid) -> Option<Self> {
         Self::ALL.into_iter().find(|c| c.uuid() == uuid)
     }

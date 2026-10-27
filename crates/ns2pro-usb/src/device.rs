@@ -1,5 +1,8 @@
-//! Complete NS2Pro USB device model, ported from VIIPER's GPL implementation.
-use crate::descriptors::*;
+//! Complete `NS2Pro` USB device model, ported from VIIPER's GPL implementation.
+use crate::descriptors::{
+    CONFIG_DESC_FULL, DEVICE_DESC, HID_DESC, HID_REPORT_DESC, MSOS_COMPAT_ID, MSOS_EXT_PROPS,
+    STRING_0, STRING_1, STRING_2, STRING_3, STRING_4, STRING_5, STRING_6, STRING_EE,
+};
 use ns2pro_proto::{
     InputState,
     input::{COMMON_BUTTON_LAYOUT, encode_buttons, pack_stick12},
@@ -42,7 +45,7 @@ impl Default for Ns2ProDevice {
     }
 }
 impl Ns2ProDevice {
-    pub fn set_identity(&mut self, identity: Option<[u8; 64]>) {
+    pub const fn set_identity(&mut self, identity: Option<[u8; 64]>) {
         self.identity = identity;
     }
     fn flash_block(&self, address: u32) -> [u8; 64] {
@@ -105,12 +108,11 @@ impl Ns2ProDevice {
         } else {
             return None;
         };
-        if p.len() < 32 {
-            return None;
-        }
+        let (left, rest) = p.split_first_chunk::<16>()?;
+        let right = rest.first_chunk::<16>()?;
         Some(Output::Rumble {
-            left: p[..16].try_into().unwrap(),
-            right: p[16..32].try_into().unwrap(),
+            left: *left,
+            right: *right,
         })
     }
     pub fn bulk_out(&mut self, out: &[u8]) -> Option<Output> {
@@ -123,7 +125,7 @@ impl Ns2ProDevice {
         let mut event = None;
         match cmd {
             2 if sub == 1 && out.len() >= 16 => {
-                let a = u32::from_le_bytes(out[12..16].try_into().unwrap());
+                let a = u32::from_le_bytes([out[12], out[13], out[14], out[15]]);
                 r.extend([0x40, 0, 0, 0]);
                 r.extend(a.to_le_bytes());
                 r.extend(self.flash_block(a));
@@ -151,15 +153,15 @@ impl Ns2ProDevice {
                             [(1, 4, 7), (2, 5, 7), (4, 6, 1), (0x10, 8, 3), (0x20, 9, 3)]
                         {
                             if flags & flag != 0 {
-                                p[i] = v
+                                p[i] = v;
                             }
                         }
-                        r.extend(p)
+                        r.extend(p);
                     }
                     2 => self.mask = flags,
                     3 => {
                         self.mask = 0;
-                        self.features = 0
+                        self.features = 0;
                     }
                     4 => self.features |= masked,
                     5 => self.features &= !masked,
@@ -189,7 +191,12 @@ impl Ns2ProDevice {
         }
         Some(response)
     }
-    /// Err means STALL (-EPIPE). Unknown descriptors are deliberately rejected.
+    /// Handles a control transfer and returns the IN data plus any host output.
+    ///
+    /// # Errors
+    ///
+    /// A negative errno to report as the URB status: `-EPIPE` (STALL) for
+    /// unsupported requests. Unknown descriptors are deliberately rejected.
     pub fn control(
         &mut self,
         setup: [u8; 8],
@@ -203,13 +210,12 @@ impl Ns2ProDevice {
         let mut event = None;
         let mut data = match (ty, req) {
             (0x80..=0x82, 0) => vec![0; 2],
-            (0, 5) => vec![],
             (0, 9) => {
                 self.configuration = vl;
                 vec![]
             }
             (0x80, 8) => vec![self.configuration],
-            (0x00..=0x02, 1 | 3) | (0x01, 11) | (0x21, 10) => vec![],
+            (0, 5) | (0x00..=0x02, 1 | 3) | (0x01, 11) | (0x21, 10) => vec![],
             (0x81, 10) => vec![0],
             (0x80 | 0x81, 6) => match (vh, vl, index) {
                 (1, 0, _) => DEVICE_DESC.to_vec(),
@@ -250,6 +256,7 @@ impl Ns2ProDevice {
         Ok((data, event))
     }
 }
+#[must_use]
 pub fn flash_block(address: u32) -> [u8; 64] {
     let mut b = [0; 64];
     match address {

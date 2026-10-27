@@ -30,7 +30,8 @@ fn command(
     command
 }
 
-pub fn elevate() -> io::Result<()> {
+pub(crate) fn elevate() -> io::Result<()> {
+    // SAFETY: geteuid takes no arguments, has no preconditions and always succeeds.
     if unsafe { libc::geteuid() } == 0 {
         return Ok(());
     }

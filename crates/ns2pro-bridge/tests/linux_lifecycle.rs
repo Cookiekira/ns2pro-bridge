@@ -1,5 +1,8 @@
 //! Portable lifecycle regressions with external radio/cache and in-memory USB seams.
-#[allow(dead_code)]
+#[expect(
+    dead_code,
+    reason = "each test binary uses a different subset of the shared fakes"
+)]
 #[path = "support/fake.rs"]
 mod fake;
 use fake::*;
@@ -59,7 +62,7 @@ async fn cancellation_preserves_cache_and_partial_setup_releases_link() {
     tokio::pin!(attempt);
     tokio::select! {
         result = &mut attempt => panic!("scan unexpectedly completed: {result:?}"),
-        _ = until(|| !radio.observed().scans.is_empty()) => {}
+        () = until(|| !radio.observed().scans.is_empty()) => {}
     }
     cancel.cancel();
     assert!(attempt.await.result.is_err());
@@ -105,7 +108,7 @@ async fn disconnect_neutral_reaches_usb_peer_and_reconnect_replays_led_without_o
             tokio::pin!(attempt);
             tokio::select! {
                 result = &mut attempt => panic!("setup failed: {result:?}"),
-                _ = until(|| radio.ready()) => {}
+                () = until(|| radio.ready()) => {}
             }
             assert_eq!(Cache::new(cache.path()).load().unwrap(), Some(address(1)));
             radio.emit(Buttons::A);
@@ -132,7 +135,7 @@ async fn disconnect_neutral_reaches_usb_peer_and_reconnect_replays_led_without_o
         tokio::pin!(reconnect);
         tokio::select! {
             result = &mut reconnect => panic!("reconnect failed: {result:?}"),
-            _ = until(|| radio.ready()) => {}
+            () = until(|| radio.ready()) => {}
         }
         tokio::task::yield_now().await;
         {

@@ -6,6 +6,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+readme.workspace = true
+keywords = ["switch2", "controller", "usb", "usbip", "virtual-device"]
+categories = ["hardware-support", "emulators"]
 
 [dependencies]
 ns2pro-proto.workspace = true

@@ -27,6 +27,11 @@ pub enum AddressType {
     Le(LeAddressType),
 }
 impl AddressType {
+    /// Decodes a management address type.
+    ///
+    /// # Errors
+    ///
+    /// [`Malformed`] for a code that is neither BR/EDR nor a known LE type.
     pub fn from_code(code: u8) -> Result<Self, Malformed> {
         if code == 0 {
             Ok(Self::BrEdr)
@@ -36,7 +41,8 @@ impl AddressType {
                 .ok_or(Malformed)
         }
     }
-    pub fn code(self) -> u8 {
+    #[must_use]
+    pub const fn code(self) -> u8 {
         match self {
             Self::BrEdr => 0,
             Self::Le(kind) => kind.to_mgmt(),
@@ -49,6 +55,11 @@ pub struct Device {
     pub address_type: AddressType,
 }
 impl Device {
+    /// Decodes a little-endian address followed by its address type.
+    ///
+    /// # Errors
+    ///
+    /// [`Malformed`] when `p` is shorter than 7 bytes or the type is unknown.
     pub fn decode(p: &[u8]) -> Result<Self, Malformed> {
         let mut bytes: [u8; 6] = p
             .get(..6)
@@ -62,6 +73,7 @@ impl Device {
             address_type,
         })
     }
+    #[must_use]
     pub fn encode(self) -> [u8; 7] {
         let mut p = [0; 7];
         p[..6].copy_from_slice(&self.address.to_le_bytes());
@@ -76,6 +88,11 @@ pub struct Frame<'a> {
     pub payload: &'a [u8],
 }
 impl<'a> Frame<'a> {
+    /// Splits a management frame into its header fields and payload.
+    ///
+    /// # Errors
+    ///
+    /// [`Malformed`] when the header is short or its length field disagrees with `p`.
     pub fn decode(p: &'a [u8]) -> Result<Self, Malformed> {
         if p.len() < 6 || usize::from(word(p, 4)?) + 6 != p.len() {
             return Err(Malformed);
@@ -87,6 +104,11 @@ impl<'a> Frame<'a> {
         })
     }
 }
+/// Encodes a management command frame.
+///
+/// # Errors
+///
+/// [`Malformed`] when `payload` does not fit the 16-bit length field.
 pub fn command(opcode: u16, index: u16, payload: &[u8]) -> Result<Vec<u8>, Malformed> {
     let len = u16::try_from(payload.len()).map_err(|_| Malformed)?;
     let mut out = Vec::with_capacity(6 + payload.len());
@@ -102,6 +124,11 @@ pub struct Completion<'a> {
     pub status: u8,
     pub data: &'a [u8],
 }
+/// Extracts a Command Complete or Command Status event; other events yield `None`.
+///
+/// # Errors
+///
+/// [`Malformed`] when a completion payload is shorter than its 3-byte header.
 pub fn completion(frame: Frame<'_>) -> Result<Option<Completion<'_>>, Malformed> {
     match frame.opcode {
         1 | 2 => {
@@ -117,6 +144,11 @@ pub fn completion(frame: Frame<'_>) -> Result<Option<Completion<'_>>, Malformed>
         _ => Ok(None),
     }
 }
+/// Decodes a Read Controller Index List reply.
+///
+/// # Errors
+///
+/// [`Malformed`] when the length disagrees with the index count.
 pub fn indexes(p: &[u8]) -> Result<Vec<u16>, Malformed> {
     let count = usize::from(word(p, 0)?);
     if p.len() != 2 + 2 * count {
@@ -124,6 +156,12 @@ pub fn indexes(p: &[u8]) -> Result<Vec<u16>, Malformed> {
     }
     (0..count).map(|i| word(p, 2 + i * 2)).collect()
 }
+/// Decodes a Get Connections reply.
+///
+/// # Errors
+///
+/// [`Malformed`] when the length disagrees with the connection count or an
+/// address type is unknown.
 pub fn connections(p: &[u8]) -> Result<Vec<Device>, Malformed> {
     let count = usize::from(word(p, 0)?);
     if p.len() != 2 + 7 * count {
@@ -143,13 +181,20 @@ pub struct AdapterInfo {
     pub current: u32,
 }
 impl AdapterInfo {
-    pub fn supports_le(&self) -> bool {
+    #[must_use]
+    pub const fn supports_le(&self) -> bool {
         self.supported & (1 << 9) != 0
     }
-    pub fn powered(&self) -> bool {
+    #[must_use]
+    pub const fn powered(&self) -> bool {
         self.current & 1 != 0
     }
 }
+/// Decodes a Read Controller Information reply.
+///
+/// # Errors
+///
+/// [`Malformed`] unless `p` is exactly 280 bytes.
 pub fn adapter_info(p: &[u8]) -> Result<AdapterInfo, Malformed> {
     if p.len() != 280 {
         return Err(Malformed);
@@ -169,17 +214,28 @@ pub struct Found<'a> {
     pub flags: u32,
     pub eir: &'a [u8],
 }
+/// Decodes a Device Found event.
+///
+/// # Errors
+///
+/// [`Malformed`] when the length disagrees with the EIR length field or the
+/// address type is unknown.
 pub fn found(p: &[u8]) -> Result<Found<'_>, Malformed> {
     if p.len() < 14 || p.len() != 14 + usize::from(word(p, 12)?) {
         return Err(Malformed);
     }
     Ok(Found {
         device: Device::decode(p)?,
-        rssi: p[7] as i8,
+        rssi: i8::from_le_bytes([p[7]]),
         flags: u32::from_le_bytes(p[8..12].try_into().map_err(|_| Malformed)?),
         eir: &p[14..],
     })
 }
+/// Returns the first controller advertisement in an EIR block.
+///
+/// # Errors
+///
+/// [`Malformed`] when an EIR structure overruns the block.
 pub fn controller_advertisement(mut eir: &[u8]) -> Result<Option<AdvertisementMode>, Malformed> {
     let mut result = None;
     while !eir.is_empty() {
@@ -192,7 +248,7 @@ pub fn controller_advertisement(mut eir: &[u8]) -> Result<Option<AdvertisementMo
         }
         if eir[1] == 0xff && n >= 3 {
             result = result.or_else(|| {
-                advertisement::parse(u16::from_le_bytes([eir[2], eir[3]]), &eir[4..n + 1])
+                advertisement::parse(u16::from_le_bytes([eir[2], eir[3]]), &eir[4..=n])
             });
         }
         eir = &eir[n + 1..];
@@ -215,7 +271,7 @@ mod tests {
             }
         );
         for n in 0..p.len() {
-            assert!(Frame::decode(&p[..n]).is_err())
+            assert!(Frame::decode(&p[..n]).is_err());
         }
         assert!(Frame::decode(&[1, 0, 0, 0, 0, 0, 1]).is_err());
     }
@@ -247,11 +303,11 @@ mod tests {
             Some(AdvertisementMode::Wake)
         );
         for n in 1..ad.len() {
-            assert!(controller_advertisement(&ad[..n]).is_err())
+            assert!(controller_advertisement(&ad[..n]).is_err());
         }
         let mut p = vec![0; 14];
         p[6] = 2;
-        p[12] = ad.len() as u8;
+        p[12] = u8::try_from(ad.len()).unwrap();
         p.extend(ad);
         assert_eq!(
             found(&p).unwrap().device.address_type,

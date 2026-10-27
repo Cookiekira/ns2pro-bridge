@@ -8,6 +8,7 @@ edition = "2024"
 rust-version = "1.88"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/Cookiekira/ns2pro-bridge"
+readme = "README.md"
 
 [workspace.dependencies]
 ns2pro-proto = { path = "crates/ns2pro-proto", version = "0.3.1" }
@@ -33,10 +34,34 @@ windows = "0.62"
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 missing_debug_implementations = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+unused_qualifications = "warn"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+# Futures are intentionally !Send: the bridge runs on a current-thread tokio runtime.
+future_not_send = "allow"
+# Duplicates are transitive; removing them needs dependency upgrades.
+multiple_crate_versions = "allow"
+# Conflicts with rustc `unreachable_pub`, which this workspace enables instead.
+redundant_pub_crate = "allow"
+# `async fn` trait impls defer side effects to first poll; `ready()` would run them eagerly.
+unused_async_trait_impl = "allow"
+# Curated restriction lints; the group as a whole is self-contradictory.
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+dbg_macro = "warn"
 mod_module_files = "warn"
+multiple_unsafe_ops_per_block = "warn"
+todo = "warn"
+undocumented_unsafe_blocks = "warn"
+unimplemented = "warn"
+unnecessary_safety_comment = "warn"
+unnecessary_safety_doc = "warn"
 
 [profile.release]
 lto = true

@@ -17,6 +17,11 @@ pub struct LinuxBluetooth {
     scans: TaskTracker,
 }
 impl LinuxBluetooth {
+    /// Selects the first LE-capable adapter, powering it on if needed.
+    ///
+    /// # Errors
+    ///
+    /// When the management socket is unavailable or no usable adapter exists.
     pub async fn new() -> Result<Self, BleError> {
         let (index, address) = Management::select().await?;
         Ok(Self {
@@ -48,6 +53,11 @@ impl LinuxBluetooth {
         self.scans.close();
         self.scans.wait().await;
     }
+    /// Runs a short discovery to prove management access works.
+    ///
+    /// # Errors
+    ///
+    /// When discovery cannot be started or stopped.
     pub async fn smoke_test(&self) -> Result<(), BleError> {
         self.discover(None, Duration::from_millis(500)).await?;
         Ok(())

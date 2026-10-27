@@ -7,7 +7,7 @@ pub const PRIMARY_FACTORY_ADDRESS: u32 = 0x13080;
 /// Factory calibration block for the right stick.
 pub const SECONDARY_FACTORY_ADDRESS: u32 = 0x130C0;
 /// User calibration block for both sticks.
-pub const USER_ADDRESS: u32 = 0x1FC040;
+pub const USER_ADDRESS: u32 = 0x1F_C040;
 pub const BLOCK_SIZE: u8 = 0x40;
 
 const FACTORY_OFFSET: usize = 0x28;
@@ -29,6 +29,7 @@ pub struct StickCalibration {
 
 impl StickCalibration {
     /// Decodes nine bytes: center, positive span, negative span.
+    #[must_use]
     pub fn decode(raw: &[u8]) -> Option<Self> {
         let raw: &[u8; 9] = raw.get(..9)?.try_into().ok()?;
         let pair = |offset: usize| {
@@ -55,6 +56,7 @@ pub struct Calibration {
 
 impl Calibration {
     /// Combines factory blocks with an optional user block; user data wins when its magic is present.
+    #[must_use]
     pub fn from_blocks(
         primary_factory: &[u8],
         secondary_factory: &[u8],

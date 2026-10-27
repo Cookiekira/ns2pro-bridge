@@ -13,6 +13,7 @@ impl Address {
     pub const MAX: u64 = 0xFFFF_FFFF_FFFF;
 
     /// Returns `None` when `value` does not fit in 48 bits.
+    #[must_use]
     pub const fn new(value: u64) -> Option<Self> {
         if value > Self::MAX {
             None
@@ -21,23 +22,27 @@ impl Address {
         }
     }
 
+    #[must_use]
     pub const fn value(self) -> u64 {
         self.0
     }
 
     /// Bytes in display order (most significant first).
-    pub fn to_be_bytes(self) -> [u8; 6] {
+    #[must_use]
+    pub const fn to_be_bytes(self) -> [u8; 6] {
         let b = self.0.to_be_bytes();
         [b[2], b[3], b[4], b[5], b[6], b[7]]
     }
 
     /// Bytes in over-the-air order (least significant first).
+    #[must_use]
     pub fn to_le_bytes(self) -> [u8; 6] {
         let mut b = self.to_be_bytes();
         b.reverse();
         b
     }
 
+    #[must_use]
     pub fn from_be_bytes(bytes: [u8; 6]) -> Self {
         let mut wide = [0u8; 8];
         wide[2..].copy_from_slice(&bytes);
@@ -64,8 +69,8 @@ impl FromStr for Address {
 
 impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let [a, b, c, d, e, g] = self.to_be_bytes();
-        write!(f, "{a:02X}:{b:02X}:{c:02X}:{d:02X}:{e:02X}:{g:02X}")
+        let [b0, b1, b2, b3, b4, b5] = self.to_be_bytes();
+        write!(f, "{b0:02X}:{b1:02X}:{b2:02X}:{b3:02X}:{b4:02X}:{b5:02X}")
     }
 }
 
@@ -105,6 +110,7 @@ pub enum LeAddressType {
 }
 impl LeAddressType {
     /// Linux management and L2CAP use 1 for LE public and 2 for LE random.
+    #[must_use]
     pub const fn from_mgmt(code: u8) -> Option<Self> {
         match code {
             1 => Some(Self::Public),
@@ -112,6 +118,7 @@ impl LeAddressType {
             _ => None,
         }
     }
+    #[must_use]
     pub const fn to_mgmt(self) -> u8 {
         match self {
             Self::Public => 1,
@@ -119,6 +126,7 @@ impl LeAddressType {
         }
     }
     /// HCI peer types include resolved public (2) and resolved random (3).
+    #[must_use]
     pub const fn from_hci_peer(code: u8) -> Option<Self> {
         match code {
             0 | 2 => Some(Self::Public),
