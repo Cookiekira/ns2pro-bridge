@@ -1,8 +1,12 @@
-# NS2Pro BLE Bridge
+# NS2Pro Bridge — Switch 2 Pro Controller on PC over Bluetooth
 
-Use a **Switch 2 Pro Controller over Bluetooth** as a wired Switch 2 Pro Controller (USB `057e:2069`) on Linux or Windows. Steam and SDL see a normal USB controller.
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-## Start here (Linux)
+Connect your **Nintendo Switch 2 Pro Controller (NS2 Pro) to a PC over Bluetooth LE** with `ns2pro-bridge`. The bridge presents the wireless controller as a wired USB Switch 2 Pro Controller (USB `057e:2069`), so Steam and SDL see a normal USB controller.
+
+Linux has been tested on real hardware. Windows currently has CI build and test coverage only; Bluetooth and driver hardware support has not yet been verified on Windows.
+
+## Connect over Bluetooth on Linux
 
 1. Install with `cargo binstall ns2pro-bridge`, or use the shell installer:
    ```sh
@@ -19,7 +23,7 @@ Linux binaries need glibc ≥ 2.39.
 The binary runs as root after the password prompt, so keep it in a path only you can write.
 Elevation uses `sudo` in a terminal and `pkexec` when stdin is not a TTY.
 
-## Windows
+## Connect over Bluetooth on Windows
 
 1. Install the signed [usbip-win2](https://github.com/vadimgrn/usbip-win2) driver (supported: v0.9.6.1–v0.9.8.1).
 2. Install with `cargo binstall ns2pro-bridge`, or use the PowerShell installer:
@@ -30,6 +34,16 @@ Elevation uses `sudo` in a terminal and `pkexec` when stdin is not a TTY.
 3. Run it, then press the controller's **sync button** the first time.
 
 Windows is verified by native CI build and tests only. It has not been tested on real Windows Bluetooth or driver hardware yet.
+
+## FAQ
+
+### How do I connect a Switch 2 Pro Controller to a PC wirelessly?
+
+Install the bridge using the Linux or Windows steps above, run `ns2pro-bridge`, and press the controller's sync button for the first connection. On subsequent connections, run the bridge and press Home to wake the controller.
+
+### Can Steam recognize the controller over Bluetooth?
+
+The bridge handles the Bluetooth LE connection and exposes a virtual USB Switch 2 Pro Controller to Steam and SDL. Steam sees the Nintendo controller rather than an emulated Xbox controller.
 
 ## If something goes wrong
 
