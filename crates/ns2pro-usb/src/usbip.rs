@@ -22,47 +22,80 @@ impl Urb {
     /// For other commands, oversize transfers, invalid endpoints and
     /// isochronous submissions.
     pub fn decode(h: &[u8; 48]) -> Result<Self, UsbipError> {
-        let get = |i: usize| u32::from_be_bytes([h[i], h[i + 1], h[i + 2], h[i + 3]]);
-        if ![1, 2].contains(&get(0)) {
+        let (words, _) = h.as_chunks::<4>();
+        let &[
+            command,
+            seq,
+            devid,
+            direction,
+            ep,
+            unlink_seq,
+            length,
+            _,
+            packets,
+            _,
+            s0,
+            s1,
+        ] = words
+        else {
+            return Err(UsbipError("short header"));
+        };
+        let word = u32::from_be_bytes;
+        let command = word(command);
+        if ![1, 2].contains(&command) {
             return Err(UsbipError("unsupported command"));
         }
-        let length = if get(0) == 1 {
-            usize::try_from(get(24)).unwrap_or(usize::MAX)
+        let length = if command == 1 {
+            usize::try_from(word(length)).unwrap_or(usize::MAX)
         } else {
             0
         };
-        if length > MAX_TRANSFER || get(12) > 1 || get(16) > 15 || (get(0) == 1 && get(32) != 0) {
+        let (direction, ep) = (word(direction), word(ep));
+        if length > MAX_TRANSFER || direction > 1 || ep > 15 || (command == 1 && word(packets) != 0)
+        {
             return Err(UsbipError(
                 "invalid length, endpoint or isochronous request",
             ));
         }
+        let [a0, a1, a2, a3] = s0;
+        let [b0, b1, b2, b3] = s1;
         Ok(Self {
-            command: get(0),
-            seq: get(4),
-            devid: get(8),
-            direction: get(12),
-            ep: get(16),
+            command,
+            seq: word(seq),
+            devid: word(devid),
+            direction,
+            ep,
             length,
-            setup: std::array::from_fn(|i| h[40 + i]),
-            unlink_seq: get(20),
+            setup: [a0, a1, a2, a3, b0, b1, b2, b3],
+            unlink_seq: word(unlink_seq),
         })
     }
     #[must_use]
     pub fn header(self) -> [u8; 48] {
+        let unlink_seq = if self.command == 2 {
+            self.unlink_seq
+        } else {
+            0
+        };
+        let words = [
+            self.command,
+            self.seq,
+            self.devid,
+            self.direction,
+            self.ep,
+            unlink_seq,
+            wire_length(self.length),
+            0,
+            0,
+            0,
+        ];
         let mut h = [0; 48];
-        for (i, v) in [
-            (0, self.command),
-            (4, self.seq),
-            (8, self.devid),
-            (12, self.direction),
-            (16, self.ep),
-            (24, wire_length(self.length)),
-        ] {
-            h[i..i + 4].copy_from_slice(&v.to_be_bytes());
-        }
-        h[40..].copy_from_slice(&self.setup);
-        if self.command == 2 {
-            h[20..24].copy_from_slice(&self.unlink_seq.to_be_bytes());
+        let bytes = words
+            .into_iter()
+            .flat_map(u32::to_be_bytes)
+            .chain(self.setup);
+        for (slot, byte) in h.iter_mut().zip(bytes) {
+            *slot = byte;
         }
         h
     }
@@ -70,28 +103,36 @@ impl Urb {
 /// USB/IP length fields carry the low 32 bits of a length.
 #[expect(
     clippy::cast_possible_truncation,
+    clippy::as_conversions,
     reason = "the wire field is 32 bits; decode bounds lengths by MAX_TRANSFER"
 )]
 const fn wire_length(length: usize) -> u32 {
     length as u32
 }
 pub fn reply_into(out: &mut Vec<u8>, urb: Urb, status: i32, payload: &[u8], actual: usize) {
-    let start = out.len();
-    out.resize(start + 48, 0);
-    let h = &mut out[start..];
-    for (i, v) in [
-        (0, if urb.command == 2 { 4 } else { 3 }),
-        (4, urb.seq),
-        (8, urb.devid),
-        (12, urb.direction),
-        (16, urb.ep),
-        (20, status.cast_unsigned()),
-    ] {
-        h[i..i + 4].copy_from_slice(&v.to_be_bytes());
-    }
-    if urb.command == 1 {
-        h[24..28].copy_from_slice(&wire_length(actual).to_be_bytes());
-    }
+    // CMD_UNLINK (2) is answered by RET_UNLINK (4), everything else by RET_SUBMIT (3);
+    // only a submit reply carries actual_length.
+    let command = if urb.command == 2 { 4 } else { 3 };
+    let actual = if urb.command == 1 {
+        wire_length(actual)
+    } else {
+        0
+    };
+    let words = [
+        command,
+        urb.seq,
+        urb.devid,
+        urb.direction,
+        urb.ep,
+        status.cast_unsigned(),
+        actual,
+        0,
+        0,
+        0,
+        0,
+        0,
+    ];
+    out.extend(words.into_iter().flat_map(u32::to_be_bytes));
     out.extend_from_slice(payload);
 }
 /// A management header retains validity separately so malformed imports still
@@ -144,7 +185,9 @@ pub fn management_reply(op: u16, valid: bool) -> Vec<u8> {
     }
     let mut dev = [0; 312];
     let path = b"/sys/devices/pci0000:00/0000:00:08.1/0000:00:04:00.3/usb1/1-1";
-    dev[..path.len()].copy_from_slice(path);
+    for (slot, byte) in dev.iter_mut().zip(path) {
+        *slot = *byte;
+    }
     dev[256..259].copy_from_slice(b"1-1");
     dev[288..292].copy_from_slice(&1u32.to_be_bytes());
     dev[292..296].copy_from_slice(&1u32.to_be_bytes());

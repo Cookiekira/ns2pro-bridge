@@ -16,6 +16,10 @@ pub enum Abi {
 impl Abi {
     pub const SUPPORTED: [Self; 3] = [Self::V0981, Self::V0978, Self::V0977];
     #[must_use]
+    #[expect(
+        clippy::as_conversions,
+        reason = "u16 to usize is lossless; `From` is not usable in const fn"
+    )]
     pub const fn size(self) -> usize {
         self.wire_size() as usize
     }
@@ -61,7 +65,7 @@ impl std::error::Error for WireError {}
 /// # Errors
 ///
 /// [`WireError::ZeroPort`] or [`WireError::InvalidHost`] for an address the
-/// driver cannot attach to.
+/// driver cannot attach to or whose text does not fit the request.
 pub fn plugin(address: SocketAddr, abi: Abi) -> Result<Vec<u8>, WireError> {
     if address.port() == 0 {
         return Err(WireError::ZeroPort);
@@ -70,12 +74,9 @@ pub fn plugin(address: SocketAddr, abi: Abi) -> Result<Vec<u8>, WireError> {
         return Err(WireError::InvalidHost);
     }
     let mut request = vec![0; abi.size()];
-    request[..4].copy_from_slice(&u32::from(abi.wire_size()).to_le_bytes());
     let busid = abi.busid();
-    request[busid..busid + 3].copy_from_slice(b"1-1");
     let service_offset = busid + 32;
     let service = address.port().to_string();
-    request[service_offset..service_offset + service.len()].copy_from_slice(service.as_bytes());
     let host_offset = service_offset + 32;
     let host = match address {
         SocketAddr::V4(address) => address.ip().to_string(),
@@ -84,10 +85,21 @@ pub fn plugin(address: SocketAddr, abi: Abi) -> Result<Vec<u8>, WireError> {
         }
         SocketAddr::V6(address) => address.ip().to_string(),
     };
-    request[host_offset..host_offset + host.len()].copy_from_slice(host.as_bytes());
     // v.0.9.8.1 exposes the driver's low-latency WSK receive-events mode.
-    if matches!(abi, Abi::V0981) {
-        request[1120] = 1;
+    let low_latency = matches!(abi, Abi::V0981).then_some((1120, &[1u8][..]));
+    for (offset, field) in [
+        (0, &u32::from(abi.wire_size()).to_le_bytes()[..]),
+        (busid, b"1-1"),
+        (service_offset, service.as_bytes()),
+        (host_offset, host.as_bytes()),
+    ]
+    .into_iter()
+    .chain(low_latency)
+    {
+        request
+            .get_mut(offset..offset + field.len())
+            .ok_or(WireError::InvalidHost)?
+            .copy_from_slice(field);
     }
     Ok(request)
 }
@@ -171,7 +183,7 @@ mod tests {
             let request = plugin("127.0.0.1:3241".parse().unwrap(), abi).unwrap();
             assert_eq!(request.len(), abi.size());
             assert_eq!(
-                u32::from_le_bytes(request[..4].try_into().unwrap()) as usize,
+                usize::try_from(u32::from_le_bytes(request[..4].try_into().unwrap())).unwrap(),
                 abi.size()
             );
             let offset = if matches!(abi, Abi::V0981) { 12 } else { 8 };
