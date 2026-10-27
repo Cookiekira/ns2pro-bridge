@@ -295,7 +295,7 @@ impl Discovery {
             }
             let kind = if size == 21 {
                 // chunks_exact(21) leaves exactly 16 UUID bytes after offset 5.
-                let Some(&mut mut bytes) = e.last_chunk::<16>().copied().as_mut() else {
+                let Some(mut bytes) = e.last_chunk::<16>().copied() else {
                     unreachable!("21-byte entry");
                 };
                 bytes.reverse();
