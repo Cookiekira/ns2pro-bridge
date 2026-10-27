@@ -1,6 +1,10 @@
 use ns2pro_proto::{Buttons, Stick};
 use ns2pro_usb::{usbip::*, *};
 use serde_json::Value;
+#[expect(
+    clippy::unwrap_used,
+    reason = "fixture helper: malformed fixtures should fail the test"
+)]
 fn hex(s: &Value) -> Vec<u8> {
     hex::decode(s.as_str().unwrap_or("")).unwrap()
 }
@@ -27,9 +31,17 @@ fn control_fixtures() {
         }
     }
 }
+#[expect(
+    clippy::unwrap_used,
+    reason = "fixture helper: malformed fixtures should fail the test"
+)]
 fn field<T: TryFrom<i64, Error: std::fmt::Debug>>(s: &Value, key: &str) -> T {
     T::try_from(s[key].as_i64().unwrap()).unwrap()
 }
+#[expect(
+    clippy::unwrap_used,
+    reason = "fixture helper: malformed fixtures should fail the test"
+)]
 fn state(s: &Value) -> ns2pro_proto::InputState {
     ns2pro_proto::InputState {
         buttons: Buttons(field(s, "Buttons")),

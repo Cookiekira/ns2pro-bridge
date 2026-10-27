@@ -7,8 +7,11 @@ use crate::{
 #[error("malformed Bluetooth management packet")]
 pub struct Malformed;
 fn word(p: &[u8], n: usize) -> Result<u16, Malformed> {
-    let b = p.get(n..n + 2).ok_or(Malformed)?;
-    Ok(u16::from_le_bytes([b[0], b[1]]))
+    p.get(n..)
+        .and_then(<[u8]>::first_chunk)
+        .copied()
+        .map(u16::from_le_bytes)
+        .ok_or(Malformed)
 }
 pub const READ_INDEX_LIST: u16 = 3;
 pub const READ_INFO: u16 = 4;
@@ -94,13 +97,16 @@ impl<'a> Frame<'a> {
     ///
     /// [`Malformed`] when the header is short or its length field disagrees with `p`.
     pub fn decode(p: &'a [u8]) -> Result<Self, Malformed> {
-        if p.len() < 6 || usize::from(word(p, 4)?) + 6 != p.len() {
+        let &[o0, o1, i0, i1, l0, l1, ref payload @ ..] = p else {
+            return Err(Malformed);
+        };
+        if usize::from(u16::from_le_bytes([l0, l1])) != payload.len() {
             return Err(Malformed);
         }
         Ok(Self {
-            opcode: word(p, 0)?,
-            index: word(p, 2)?,
-            payload: &p[6..],
+            opcode: u16::from_le_bytes([o0, o1]),
+            index: u16::from_le_bytes([i0, i1]),
+            payload,
         })
     }
 }
@@ -129,16 +135,16 @@ pub struct Completion<'a> {
 /// # Errors
 ///
 /// [`Malformed`] when a completion payload is shorter than its 3-byte header.
-pub fn completion(frame: Frame<'_>) -> Result<Option<Completion<'_>>, Malformed> {
+pub const fn completion(frame: Frame<'_>) -> Result<Option<Completion<'_>>, Malformed> {
     match frame.opcode {
         1 | 2 => {
-            if frame.payload.len() < 3 {
+            let &[c0, c1, status, ref data @ ..] = frame.payload else {
                 return Err(Malformed);
-            }
+            };
             Ok(Some(Completion {
-                command: word(frame.payload, 0)?,
-                status: frame.payload[2],
-                data: &frame.payload[3..],
+                command: u16::from_le_bytes([c0, c1]),
+                status,
+                data,
             }))
         }
         _ => Ok(None),
@@ -167,7 +173,8 @@ pub fn connections(p: &[u8]) -> Result<Vec<Device>, Malformed> {
     if p.len() != 2 + 7 * count {
         return Err(Malformed);
     }
-    p[2..]
+    p.get(2..)
+        .ok_or(Malformed)?
         .as_chunks::<7>()
         .0
         .iter()
@@ -196,15 +203,34 @@ impl AdapterInfo {
 ///
 /// [`Malformed`] unless `p` is exactly 280 bytes.
 pub fn adapter_info(p: &[u8]) -> Result<AdapterInfo, Malformed> {
-    if p.len() != 280 {
+    let Ok(p) = <&[u8; 280]>::try_from(p) else {
         return Err(Malformed);
-    }
-    let mut b: [u8; 6] = p[..6].try_into().map_err(|_| Malformed)?;
-    b.reverse();
+    };
+    // Address (LE), version, manufacturer, supported and current settings.
+    let &[
+        a0,
+        a1,
+        a2,
+        a3,
+        a4,
+        a5,
+        _,
+        _,
+        _,
+        s0,
+        s1,
+        s2,
+        s3,
+        c0,
+        c1,
+        c2,
+        c3,
+        ..,
+    ] = p;
     Ok(AdapterInfo {
-        address: Address::from_be_bytes(b),
-        supported: u32::from_le_bytes(p[9..13].try_into().map_err(|_| Malformed)?),
-        current: u32::from_le_bytes(p[13..17].try_into().map_err(|_| Malformed)?),
+        address: Address::from_be_bytes([a5, a4, a3, a2, a1, a0]),
+        supported: u32::from_le_bytes([s0, s1, s2, s3]),
+        current: u32::from_le_bytes([c0, c1, c2, c3]),
     })
 }
 #[derive(Debug)]
@@ -221,14 +247,35 @@ pub struct Found<'a> {
 /// [`Malformed`] when the length disagrees with the EIR length field or the
 /// address type is unknown.
 pub fn found(p: &[u8]) -> Result<Found<'_>, Malformed> {
-    if p.len() < 14 || p.len() != 14 + usize::from(word(p, 12)?) {
+    // Device (7 bytes), RSSI, flags, EIR length, EIR.
+    let &[
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+        rssi,
+        f0,
+        f1,
+        f2,
+        f3,
+        e0,
+        e1,
+        ref eir @ ..,
+    ] = p
+    else {
+        return Err(Malformed);
+    };
+    if eir.len() != usize::from(u16::from_le_bytes([e0, e1])) {
         return Err(Malformed);
     }
     Ok(Found {
         device: Device::decode(p)?,
-        rssi: i8::from_le_bytes([p[7]]),
-        flags: u32::from_le_bytes(p[8..12].try_into().map_err(|_| Malformed)?),
-        eir: &p[14..],
+        rssi: i8::from_le_bytes([rssi]),
+        flags: u32::from_le_bytes([f0, f1, f2, f3]),
+        eir,
     })
 }
 /// Returns the first controller advertisement in an EIR block.
@@ -238,20 +285,18 @@ pub fn found(p: &[u8]) -> Result<Found<'_>, Malformed> {
 /// [`Malformed`] when an EIR structure overruns the block.
 pub fn controller_advertisement(mut eir: &[u8]) -> Result<Option<AdvertisementMode>, Malformed> {
     let mut result = None;
-    while !eir.is_empty() {
-        let n = usize::from(eir[0]);
-        if n == 0 {
+    // Each EIR structure is a length byte followed by that many bytes (type first).
+    while let Some((&length, rest)) = eir.split_first() {
+        if length == 0 {
             break;
         }
-        if n + 1 > eir.len() {
-            return Err(Malformed);
+        let (structure, next) = rest
+            .split_at_checked(usize::from(length))
+            .ok_or(Malformed)?;
+        if let &[0xff, c0, c1, ref data @ ..] = structure {
+            result = result.or_else(|| advertisement::parse(u16::from_le_bytes([c0, c1]), data));
         }
-        if eir[1] == 0xff && n >= 3 {
-            result = result.or_else(|| {
-                advertisement::parse(u16::from_le_bytes([eir[2], eir[3]]), &eir[4..=n])
-            });
-        }
-        eir = &eir[n + 1..];
+        eir = next;
     }
     Ok(result)
 }

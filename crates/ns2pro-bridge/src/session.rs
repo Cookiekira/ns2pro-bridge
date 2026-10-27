@@ -98,7 +98,7 @@ pub async fn supervise<B: Bluetooth>(
     channels: &Channels,
     cancel: &CancellationToken,
 ) -> Result<(), SessionError> {
-    let cache = Cache::new(options.cache_file.clone());
+    let cache = Cache::new(options.cache_file()?);
     if options.forget_device {
         cache.forget()?;
     }

@@ -4,6 +4,10 @@ use ns2pro_bridge::{app, cli::Options};
 mod elevation;
 
 #[tokio::main(flavor = "current_thread")]
+#[expect(
+    clippy::print_stderr,
+    reason = "these failures happen before the tracing subscriber exists"
+)]
 async fn main() -> std::process::ExitCode {
     let options = Options::parse();
     #[cfg(target_os = "linux")]

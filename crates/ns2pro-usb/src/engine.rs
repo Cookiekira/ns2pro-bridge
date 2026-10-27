@@ -132,8 +132,7 @@ impl UrbEngine {
     }
     fn drain(&mut self, now: u64, keepalive: bool, e: &mut Effects) {
         let mut i = 0;
-        while i < self.pending.len() {
-            let urb = self.pending[i];
+        while let Some(&urb) = self.pending.get(i) {
             if urb.ep == 1
                 && (self.dirty || (keepalive && now >= self.last_report.saturating_add(4000)))
             {
@@ -146,8 +145,8 @@ impl UrbEngine {
                 e.input_completions += 1;
                 e.completed_sample_seq = Some(self.sample.seq);
                 self.pending.remove(i);
-                let actual = urb.length.min(report.len());
-                reply_into(&mut e.replies, urb, 0, &report[..actual], actual);
+                let payload = report.get(..urb.length).unwrap_or(&report);
+                reply_into(&mut e.replies, urb, 0, payload, payload.len());
             } else if urb.ep == 2 {
                 if let Some(data) = self.device.read_bulk_in(urb.length) {
                     self.pending.remove(i);

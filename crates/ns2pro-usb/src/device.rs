@@ -73,8 +73,13 @@ impl Ns2ProDevice {
             b[0x2a] = 1;
             if self.features & 4 != 0 {
                 b[0x2b..0x2f].copy_from_slice(&sample.motion_timestamp_us.to_le_bytes());
-                for (i, v) in s.accel.iter().chain(s.gyro.iter()).enumerate() {
-                    b[0x31 + i * 2..0x33 + i * 2].copy_from_slice(&v.to_le_bytes());
+                for (field, v) in b[0x31..0x3D]
+                    .as_chunks_mut::<2>()
+                    .0
+                    .iter_mut()
+                    .zip(s.accel.iter().chain(&s.gyro))
+                {
+                    *field = v.to_le_bytes();
                 }
             }
         } else {
@@ -84,12 +89,12 @@ impl Ns2ProDevice {
             b[2] = (s.battery_level.min(9) << 2)
                 | u8::from(s.external_power)
                 | (u8::from(s.charging) << 1);
-            // Canonical layout is ordered exactly as the Pro report bits (headset is absent).
-            for i in 0..21 {
-                if s.buttons.0 & (1 << i) != 0 {
-                    b[3 + i / 8] |= 1 << (i % 8);
-                }
-            }
+            // Canonical layout is ordered exactly as the Pro report's 21 button bits
+            // (headset is absent).
+            let [low, middle, high, _] = (s.buttons.0 & 0x1F_FFFF).to_le_bytes();
+            b[3] = low;
+            b[4] = middle;
+            b[5] = high;
             b[6..9].copy_from_slice(&pack_stick12(s.left_stick.x, s.left_stick.y));
             b[9..12].copy_from_slice(&pack_stick12(s.right_stick.x, s.right_stick.y));
             b[12] = if self.features & 0x20 != 0 {
@@ -101,12 +106,10 @@ impl Ns2ProDevice {
         b
     }
     pub fn interrupt_out(&mut self, data: &[u8]) -> Option<Output> {
-        let p = if data.first() == Some(&2) {
-            &data[1..]
-        } else if data.len() == 32 {
-            data
-        } else {
-            return None;
+        let p = match data.split_first() {
+            Some((&2, report)) => report,
+            _ if data.len() == 32 => data,
+            _ => return None,
         };
         let (left, rest) = p.split_first_chunk::<16>()?;
         let right = rest.first_chunk::<16>()?;
@@ -116,19 +119,20 @@ impl Ns2ProDevice {
         })
     }
     pub fn bulk_out(&mut self, out: &[u8]) -> Option<Output> {
-        if out.len() < 8 {
+        let &[cmd, _, seq, sub, _, _, _, _, ..] = out else {
             return None;
-        }
-        let (cmd, seq, sub) = (out[0], out[2], out[3]);
+        };
         let flags = out.get(8).copied().unwrap_or(0);
         let mut r = vec![cmd, 1, seq, sub, 0x10, 0x78, 0, 0];
         let mut event = None;
         match cmd {
-            2 if sub == 1 && out.len() >= 16 => {
-                let a = u32::from_le_bytes([out[12], out[13], out[14], out[15]]);
-                r.extend([0x40, 0, 0, 0]);
-                r.extend(a.to_le_bytes());
-                r.extend(self.flash_block(a));
+            2 if sub == 1 => {
+                if let Some(&[a0, a1, a2, a3]) = out.get(12..16) {
+                    let a = u32::from_le_bytes([a0, a1, a2, a3]);
+                    r.extend([0x40, 0, 0, 0]);
+                    r.extend(a.to_le_bytes());
+                    r.extend(self.flash_block(a));
+                }
             }
             3 => match sub {
                 3 | 0x0d => r.extend([1, 0, 0, 0]),
@@ -148,15 +152,21 @@ impl Ns2ProDevice {
                 };
                 match sub {
                     1 => {
-                        let mut p = [0; 12];
-                        for (flag, i, v) in
-                            [(1, 4, 7), (2, 5, 7), (4, 6, 1), (0x10, 8, 3), (0x20, 9, 3)]
-                        {
-                            if flags & flag != 0 {
-                                p[i] = v;
-                            }
-                        }
-                        r.extend(p);
+                        let when = |flag, value| if flags & flag != 0 { value } else { 0 };
+                        r.extend([
+                            0,
+                            0,
+                            0,
+                            0,
+                            when(1, 7),
+                            when(2, 7),
+                            when(4, 1),
+                            0,
+                            when(0x10, 3),
+                            when(0x20, 3),
+                            0,
+                            0,
+                        ]);
                     }
                     2 => self.mask = flags,
                     3 => {

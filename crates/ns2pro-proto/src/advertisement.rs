@@ -3,9 +3,6 @@
 const NINTENDO_COMPANY_ID: u16 = 0x0553;
 const NINTENDO_VID: u16 = 0x057E;
 const NS2PRO_PID: u16 = 0x2069;
-const VID_OFFSET: usize = 3;
-const PID_OFFSET: usize = 5;
-const MODE_OFFSET: usize = 9;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AdvertisementMode {
@@ -18,14 +15,15 @@ pub enum AdvertisementMode {
 /// Parses one manufacturer-specific data entry.
 #[must_use]
 pub fn parse(company_id: u16, data: &[u8]) -> Option<AdvertisementMode> {
-    if company_id != NINTENDO_COMPANY_ID || data.len() <= MODE_OFFSET {
+    // VID at 3, PID at 5 (little endian), mode at 9; trailing bytes are ignored.
+    let &[_, _, _, v0, v1, p0, p1, _, _, mode] = data.first_chunk::<10>()?;
+    if company_id != NINTENDO_COMPANY_ID
+        || u16::from_le_bytes([v0, v1]) != NINTENDO_VID
+        || u16::from_le_bytes([p0, p1]) != NS2PRO_PID
+    {
         return None;
     }
-    let read_u16 = |offset: usize| u16::from_le_bytes([data[offset], data[offset + 1]]);
-    if read_u16(VID_OFFSET) != NINTENDO_VID || read_u16(PID_OFFSET) != NS2PRO_PID {
-        return None;
-    }
-    match data[MODE_OFFSET] {
+    match mode {
         0x00 => Some(AdvertisementMode::StandardReconnect),
         0x81 => Some(AdvertisementMode::Wake),
         _ => None,

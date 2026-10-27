@@ -46,13 +46,18 @@ impl Pairing {
             stage: 0,
         })
     }
+    /// # Panics
+    ///
+    /// Never: [`Self::new`] rejects a zero host, so `host - 1` is a valid address.
     #[must_use]
+    #[expect(clippy::expect_used, reason = "the host is nonzero by construction")]
     pub fn next_command(&self) -> Option<Vec<u8>> {
         let (sub, payload) = match self.stage {
             0 => {
                 let mut p = vec![0, 2];
                 p.extend(self.host.to_le_bytes());
-                p.extend(Address::new(self.host.value() - 1)?.to_le_bytes());
+                let previous = Address::new(self.host.value() - 1).expect("nonzero host");
+                p.extend(previous.to_le_bytes());
                 (1, p)
             }
             1 => (4, [&[0][..], &self.key].concat()),
@@ -70,22 +75,23 @@ impl Pairing {
     /// when the controller refuses a stage or pairing already finished, and
     /// [`PairingError::Confirmation`] when the derived LTK does not match.
     pub fn on_response(&mut self, reply: &[u8]) -> Result<(), PairingError> {
-        let sub = [1, 4, 2, 3]
-            .get(self.stage as usize)
+        // (subcommand, minimum payload length) per stage.
+        let (sub, required) = [(1, 9), (4, 17), (2, 17), (3, 1)]
+            .get(usize::from(self.stage))
             .copied()
             .ok_or(PairingError::Rejected(self.stage))?;
         let p = response_payload(reply, 0x15, sub)?;
-        let required = [9, 17, 17, 1][self.stage as usize];
-        if p.len() < required || p[0] != 1 {
+        let Some((&1, data)) = p.split_first().filter(|_| p.len() >= required) else {
             return Err(PairingError::Rejected(sub));
-        }
-        match self.stage {
-            1 => {
-                for (i, b) in self.ltk.iter_mut().enumerate() {
-                    *b = self.key[i] ^ p[i + 1];
+        };
+        let block = data.first_chunk::<16>();
+        match (self.stage, block) {
+            (1, Some(peer)) => {
+                for ((ltk, key), peer) in self.ltk.iter_mut().zip(self.key).zip(peer) {
+                    *ltk = key ^ peer;
                 }
             }
-            2 if p[1..17] != confirmation(self.ltk, self.challenge) => {
+            (2, _) if block != Some(&confirmation(self.ltk, self.challenge)) => {
                 return Err(PairingError::Confirmation);
             }
             _ => {}

@@ -4,16 +4,25 @@ use uuid::Uuid;
 
 pub const DEFAULT_MTU: u16 = 23;
 pub const MTU: u16 = 247;
+/// [`MTU`] as a buffer length.
+#[expect(
+    clippy::as_conversions,
+    reason = "u16 to usize is lossless; `From` is not usable in const items"
+)]
+pub const MTU_LEN: usize = MTU as usize;
 pub const ERROR_RESPONSE: u8 = 0x01;
 pub const WRITE_RESPONSE: [u8; 1] = [0x13];
 pub const HANDLE_VALUE_CONFIRMATION: [u8; 1] = [0x1e];
 pub const REQUEST_NOT_SUPPORTED: u8 = 0x06;
 
-pub fn write_command<'a>(buffer: &'a mut [u8], handle: u16, value: &[u8]) -> &'a [u8] {
-    buffer[0] = 0x52;
-    buffer[1..3].copy_from_slice(&handle.to_le_bytes());
-    buffer[3..3 + value.len()].copy_from_slice(value);
-    &buffer[..3 + value.len()]
+/// Encodes a Write Command into `buffer`; `None` when `buffer` is too small.
+pub fn write_command<'a>(buffer: &'a mut [u8], handle: u16, value: &[u8]) -> Option<&'a [u8]> {
+    let packet = buffer.get_mut(..3 + value.len())?;
+    let (header, body) = packet.split_first_chunk_mut::<3>()?;
+    let [low, high] = handle.to_le_bytes();
+    *header = [0x52, low, high];
+    body.copy_from_slice(value);
+    Some(packet)
 }
 #[must_use]
 pub const fn cccd_write_request(handle: u16) -> [u8; 5] {
@@ -45,8 +54,10 @@ pub enum AttError {
     Missing(Characteristic),
 }
 fn word(b: &[u8], n: usize) -> Result<u16, AttError> {
-    b.get(n..n + 2)
-        .map(|v| u16::from_le_bytes([v[0], v[1]]))
+    b.get(n..)
+        .and_then(<[u8]>::first_chunk)
+        .copied()
+        .map(u16::from_le_bytes)
         .ok_or(AttError::Malformed)
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +98,24 @@ impl Default for Discovery {
         Self::new()
     }
 }
+/// Splits a Read By Type/Group Type response into its entry size and entries.
+fn entries<'a>(p: &'a [u8], sizes: &[usize]) -> Result<(usize, &'a [u8]), AttError> {
+    let size = usize::from(*p.get(1).ok_or(AttError::Malformed)?);
+    if sizes.contains(&size) {
+        entries_of(p, size)
+    } else {
+        Err(AttError::Malformed)
+    }
+}
+/// Requires at least one whole `size`-byte entry after the 2-byte header.
+fn entries_of(p: &[u8], size: usize) -> Result<(usize, &[u8]), AttError> {
+    match p.get(2..) {
+        Some(entries) if entries.len() >= size && entries.len().is_multiple_of(size) => {
+            Ok((size, entries))
+        }
+        _ => Err(AttError::Malformed),
+    }
+}
 fn range(op: u8, start: u16, end: u16, uuid: Option<u16>) -> Vec<u8> {
     let mut p = vec![op];
     p.extend(start.to_le_bytes());
@@ -111,6 +140,10 @@ impl Discovery {
         self.mtu
     }
     #[must_use]
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "stage indices always name an existing service and declaration"
+    )]
     pub fn request(&self) -> Option<Vec<u8>> {
         match self.stage {
             Stage::Mtu => Some(mtu_request().to_vec()),
@@ -124,30 +157,34 @@ impl Discovery {
             Stage::Done => None,
         }
     }
+    /// Last handle that can belong to declaration `c`'s descriptors.
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "stage indices always name an existing service and declaration"
+    )]
     fn descriptor_end(&self, s: usize, c: usize) -> u16 {
         self.declarations[s]
             .get(c + 1)
             .map_or(self.services[s].end, |d| d.handle - 1)
     }
     fn next_service(&mut self, s: usize) {
-        self.stage = if s < self.services.len() {
-            Stage::Characteristics(s, self.services[s].start)
-        } else {
-            Stage::Done
-        };
+        self.stage = self.services.get(s).map_or(Stage::Done, |service| {
+            Stage::Characteristics(s, service.start)
+        });
         if matches!(self.stage, Stage::Done) {
             self.next_descriptor(0, 0);
         }
     }
     fn next_descriptor(&mut self, mut s: usize, mut c: usize) {
-        while s < self.services.len() {
-            while c < self.declarations[s].len() {
-                let d = &self.declarations[s][c];
+        // `declarations` has one entry per service once characteristic discovery starts.
+        while let Some(declarations) = self.declarations.get(s) {
+            while let Some(d) = declarations.get(c) {
                 if d.kind
                     .is_some_and(|k| Characteristic::NOTIFYING.contains(&k))
                     && d.value < self.descriptor_end(s, c)
                 {
-                    self.stage = Stage::Descriptors(s, c, d.value + 1);
+                    let first = d.value + 1;
+                    self.stage = Stage::Descriptors(s, c, first);
                     return;
                 }
                 c += 1;
@@ -165,11 +202,16 @@ impl Discovery {
     /// request or discovery is already done, and [`AttError::Remote`] when the
     /// peer rejects a request with anything other than "attribute not found".
     pub fn on_response(&mut self, p: &[u8]) -> Result<(), AttError> {
-        let req = self.request().ok_or(AttError::Malformed)?;
+        let request = self.request().ok_or(AttError::Malformed)?;
+        #[expect(
+            clippy::indexing_slicing,
+            reason = "every request starts with its opcode"
+        )]
+        let opcode = request[0];
         if p.first() == Some(&ERROR_RESPONSE) {
-            return self.on_error_response(p, req[0]);
+            return self.on_error_response(p, opcode);
         }
-        if p.first().copied() != Some(req[0] + 1) {
+        if p.first().copied() != Some(opcode + 1) {
             return Err(AttError::Malformed);
         }
         match self.stage {
@@ -188,18 +230,21 @@ impl Discovery {
         }
     }
     fn on_error_response(&mut self, p: &[u8], request: u8) -> Result<(), AttError> {
-        if p.len() != 5 || p[1] != request {
+        let [_, failed, handle_low, handle_high, code] = *p else {
+            return Err(AttError::Malformed);
+        };
+        if failed != request {
             return Err(AttError::Malformed);
         }
-        if matches!(self.stage, Stage::Mtu) && p[4] == 6 {
+        if matches!(self.stage, Stage::Mtu) && code == REQUEST_NOT_SUPPORTED {
             self.stage = Stage::Services(1);
             return Ok(());
         }
-        if p[4] != 0x0a {
+        if code != 0x0a {
             return Err(AttError::Remote {
-                request: p[1],
-                handle: word(p, 2)?,
-                code: p[4],
+                request: failed,
+                handle: u16::from_le_bytes([handle_low, handle_high]),
+                code,
             });
         }
         match self.stage {
@@ -214,12 +259,9 @@ impl Discovery {
         Ok(())
     }
     fn on_services(&mut self, p: &[u8], start: u16) -> Result<(), AttError> {
-        let size = *p.get(1).ok_or(AttError::Malformed)? as usize;
-        if ![6, 20].contains(&size) || p.len() < size + 2 || !(p.len() - 2).is_multiple_of(size) {
-            return Err(AttError::Malformed);
-        }
+        let (size, entries) = entries(p, &[6, 20])?;
         let mut next = start;
-        for e in p[2..].chunks_exact(size) {
+        for e in entries.chunks_exact(size) {
             let a = word(e, 0)?;
             let b = word(e, 2)?;
             if a < next || b < a {
@@ -236,26 +278,32 @@ impl Discovery {
         }
         Ok(())
     }
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "stage indices always name an existing service and declaration"
+    )]
     fn on_characteristics(&mut self, p: &[u8], s: usize, start: u16) -> Result<(), AttError> {
-        let size = *p.get(1).ok_or(AttError::Malformed)? as usize;
-        if ![7, 21].contains(&size) || p.len() < size + 2 || !(p.len() - 2).is_multiple_of(size) {
-            return Err(AttError::Malformed);
-        }
+        let (size, entries) = entries(p, &[7, 21])?;
+        let service_end = self.services[s].end;
+        let declarations = &mut self.declarations[s];
         let mut next = start;
-        for e in p[2..].chunks_exact(size) {
+        for e in entries.chunks_exact(size) {
             let handle = word(e, 0)?;
             let value = word(e, 3)?;
-            if handle < next || value <= handle || value > self.services[s].end {
+            if handle < next || value <= handle || value > service_end {
                 return Err(AttError::Malformed);
             }
             let kind = if size == 21 {
-                let mut bytes: [u8; 16] = e[5..].try_into().map_err(|_| AttError::Malformed)?;
+                // chunks_exact(21) leaves exactly 16 UUID bytes after offset 5.
+                let Some(mut bytes) = e.last_chunk::<16>().copied() else {
+                    unreachable!("21-byte entry");
+                };
                 bytes.reverse();
                 Characteristic::from_uuid(Uuid::from_bytes(bytes))
             } else {
                 None
             };
-            self.declarations[s].push(Declaration {
+            declarations.push(Declaration {
                 handle,
                 value,
                 kind,
@@ -263,35 +311,38 @@ impl Discovery {
             });
             next = handle.saturating_add(1);
         }
-        if next >= self.services[s].end {
+        if next >= service_end {
             self.next_service(s + 1);
         } else {
             self.stage = Stage::Characteristics(s, next);
         }
         Ok(())
     }
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "stage indices always name an existing service and declaration"
+    )]
     fn on_descriptors(&mut self, p: &[u8], s: usize, c: usize, start: u16) -> Result<(), AttError> {
-        let size = match p.get(1) {
-            Some(1) => 4,
-            Some(2) => 18,
+        // Find Information format 1 has 16-bit UUIDs, format 2 has 128-bit UUIDs.
+        let (size, entries) = match p.get(1) {
+            Some(1) => entries_of(p, 4)?,
+            Some(2) => entries_of(p, 18)?,
             _ => return Err(AttError::Malformed),
         };
-        if p.len() < size + 2 || !(p.len() - 2).is_multiple_of(size) {
-            return Err(AttError::Malformed);
-        }
         let end = self.descriptor_end(s, c);
+        let declaration = &mut self.declarations[s][c];
         let mut last = 0;
-        for e in p[2..].chunks_exact(size) {
+        for e in entries.chunks_exact(size) {
             let handle = word(e, 0)?;
             if handle < start || handle <= last || handle > end {
                 return Err(AttError::Malformed);
             }
             last = handle;
             if size == 4 && word(e, 2)? == 0x2902 {
-                self.declarations[s][c].cccd = Some(handle);
+                declaration.cccd = Some(handle);
             }
         }
-        if self.declarations[s][c].cccd.is_some() || last == end {
+        if declaration.cccd.is_some() || last == end {
             self.next_descriptor(s, c + 1);
         } else {
             self.stage = Stage::Descriptors(s, c, last + 1);
@@ -353,7 +404,7 @@ pub fn classify(p: &[u8]) -> Result<Packet<'_>, AttError> {
     match op {
         0x1b | 0x1d => Ok(Packet::Notification {
             handle: word(p, 1)?,
-            value: &p[3..],
+            value: p.get(3..).ok_or(AttError::Malformed)?,
             indication: op == 0x1d,
         }),
         2 if p.len() == 3 && word(p, 1)? >= DEFAULT_MTU => Ok(Packet::Mtu(word(p, 1)?)),
@@ -373,6 +424,23 @@ pub fn classify(p: &[u8]) -> Result<Packet<'_>, AttError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn write_command_needs_room_and_leaves_short_buffers_untouched() {
+        let mut exact = [0xEE; 6];
+        assert_eq!(
+            write_command(&mut exact, 0x1234, &[1, 2, 3]),
+            Some(&[0x52, 0x34, 0x12, 1, 2, 3][..])
+        );
+        let mut roomy = [0xEE; 8];
+        assert_eq!(
+            write_command(&mut roomy, 0x1234, &[1, 2, 3]).map(<[u8]>::len),
+            Some(6)
+        );
+        assert_eq!(roomy[6..], [0xEE, 0xEE]);
+        let mut short = [0xEE; 5];
+        assert_eq!(write_command(&mut short, 0x1234, &[1, 2, 3]), None);
+        assert_eq!(short, [0xEE; 5]);
+    }
     #[test]
     fn asynchronous_packets_borrow_and_validate() {
         assert_eq!(

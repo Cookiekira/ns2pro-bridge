@@ -44,20 +44,21 @@ fn ports(text: &str) -> Result<Vec<Port>, AttachError> {
                 return None;
             }
             Some((|| {
-                if fields.len() < 6 {
+                // hub, port, status, speed, devid (hex), sockfd, local busid
+                let &[_, number, status, _, device, fd, ..] = fields.as_slice() else {
                     return Err(AttachError::Platform("malformed vhci status row".into()));
-                }
-                let decimal = |n: usize| {
-                    fields[n]
+                };
+                let decimal = |field: &str| {
+                    field
                         .parse::<u32>()
                         .map_err(|_| AttachError::Platform("invalid vhci status integer".into()))
                 };
                 Ok(Port {
-                    number: decimal(1)?,
-                    status: decimal(2)?,
-                    device: u32::from_str_radix(fields[4], 16)
+                    number: decimal(number)?,
+                    status: decimal(status)?,
+                    device: u32::from_str_radix(device, 16)
                         .map_err(|_| AttachError::Platform("invalid vhci device id".into()))?,
-                    fd: decimal(5)?,
+                    fd: decimal(fd)?,
                 })
             })())
         })

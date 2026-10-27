@@ -1,4 +1,11 @@
 //! Test-only external controller and persistence fixtures.
+#![expect(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    reason = "test fixture: a broken scenario should panic and fail the test"
+)]
 use clap::Parser;
 use ns2pro_bridge::{
     ble::{
@@ -260,7 +267,7 @@ impl Drop for TestCache {
 }
 pub(crate) fn options(cache: &TestCache) -> Options {
     let mut o = Options::parse_from(["bridge", "--no-auto-attach"]);
-    o.cache_file = cache.path();
+    o.cache_file = Some(cache.path());
     o
 }
 pub(crate) async fn until(mut condition: impl FnMut() -> bool) {

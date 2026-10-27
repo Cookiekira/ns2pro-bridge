@@ -27,7 +27,7 @@ struct CountingAllocator;
 fn allocated(bytes: usize) {
     let _ = ALLOCATIONS.try_with(|c| {
         if let Some((n, b)) = c.get() {
-            c.set(Some((n + 1, b + bytes as u64)));
+            c.set(Some((n + 1, b + u64::try_from(bytes).unwrap_or(u64::MAX))));
         }
     });
 }
@@ -59,11 +59,17 @@ static ALLOCATOR: CountingAllocator = CountingAllocator;
 fn start_count() {
     ALLOCATIONS.with(|c| c.set(Some((0, 0))));
 }
+#[expect(clippy::unwrap_used, reason = "start_count always precedes stop_count")]
 fn stop_count() -> (u64, u64) {
     ALLOCATIONS.with(|c| c.replace(None).unwrap())
 }
 const WARMUP: usize = 256;
 const SAMPLES: usize = 10000;
+#[expect(
+    clippy::print_stderr,
+    clippy::indexing_slicing,
+    reason = "reports percentiles of a non-empty experiment to the test log"
+)]
 fn summarize(name: &str, mut ns: Vec<u64>, allocations: u64, bytes: u64) {
     ns.sort_unstable();
     eprintln!(

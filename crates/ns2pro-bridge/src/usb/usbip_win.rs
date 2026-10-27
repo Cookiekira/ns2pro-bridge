@@ -66,6 +66,7 @@ fn dos_error(status: windows::Win32::Foundation::NTSTATUS) -> i32 {
 /// `cbSize` value for a fixed-size Win32 structure.
 #[expect(
     clippy::cast_possible_truncation,
+    clippy::as_conversions,
     reason = "bounded by the compile-time assertion"
 )]
 const fn cb_size<T>() -> u32 {
@@ -335,7 +336,12 @@ impl Attached {
                         error
                     }
                 })?;
-                let port_len = u32::try_from(wire::PORT_END).map_err(platform)?;
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_possible_truncation,
+                    reason = "PORT_END is 8"
+                )]
+                let port_len = wire::PORT_END as u32;
                 for abi in wire::Abi::SUPPORTED {
                     let mut request = wire::plugin(address, abi).map_err(platform)?;
                     match ioctl(

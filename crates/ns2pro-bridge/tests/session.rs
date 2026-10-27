@@ -34,10 +34,18 @@ const fn urb(seq: u32, dir: u32, ep: u32, len: usize) -> Urb {
         unlink_seq: 0,
     }
 }
+#[expect(
+    clippy::unwrap_used,
+    reason = "test helper: a failed write should fail the test"
+)]
 async fn send(peer: &mut DuplexStream, u: Urb, body: &[u8]) {
     peer.write_all(&u.header()).await.unwrap();
     peer.write_all(body).await.unwrap();
 }
+#[expect(
+    clippy::unwrap_used,
+    reason = "test helper: a malformed exchange should fail the test"
+)]
 async fn reply(peer: &mut DuplexStream) -> (u32, i32, Vec<u8>) {
     let mut h = [0; 48];
     peer.read_exact(&mut h).await.unwrap();
@@ -46,7 +54,7 @@ async fn reply(peer: &mut DuplexStream) -> (u32, i32, Vec<u8>) {
     let dir = u32::from_be_bytes(h[12..16].try_into().unwrap());
     let cmd = u32::from_be_bytes(h[..4].try_into().unwrap());
     let n = if dir == 1 && cmd == 3 {
-        u32::from_be_bytes(h[24..28].try_into().unwrap()) as usize
+        usize::try_from(u32::from_be_bytes(h[24..28].try_into().unwrap())).unwrap()
     } else {
         0
     };
@@ -64,6 +72,11 @@ fn report() -> [u8; 60] {
     r[48..50].copy_from_slice(&(-5i16).to_le_bytes());
     r
 }
+#[expect(
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    reason = "test helper: a malformed exchange should fail the test"
+)]
 async fn read_usb_identity(peer: &mut DuplexStream) -> [u8; 64] {
     let mut payload = [0; 8];
     payload[4..].copy_from_slice(&0x13000u32.to_le_bytes());
@@ -186,7 +199,7 @@ async fn complete_session_notification_to_usb_and_outputs() {
             send(&mut peer, urb(seq, 0, 2, bytes.len()), &bytes).await;
             assert_eq!(reply(&mut peer).await.1, 0);
             send(&mut peer, urb(seq + 10, 1, 2, 64), &[]).await;
-            assert_ne!(reply(&mut peer).await.2, [] as [u8; 0]);
+            assert_ne!(reply(&mut peer).await.2, [0u8; 0]);
         }
         send(&mut peer, urb(20, 1, 1, 64), &[]).await;
         reply(&mut peer).await;
@@ -424,7 +437,7 @@ async fn discovery_pairing_cache_host_override_and_pair_once_per_process() {
         "11:22:33:44:55:66",
         "--pair-host",
     ]);
-    options.cache_file = cache.path();
+    options.cache_file = Some(cache.path());
     let report = ConnectionReport {
         target: ConnectionTarget::Interval(6),
         preference: PreferenceOutcome::Confirmed,
@@ -496,7 +509,7 @@ async fn forget_device_and_bounded_cancellable_backoff() {
         .save(Address::new(1).unwrap())
         .unwrap();
     let mut options = Options::parse_from(["bridge", "--forget-device"]);
-    options.cache_file = cache.path();
+    options.cache_file = Some(cache.path());
     let bluetooth = FakeController::new(FakeOptions {
         fail_scan: true,
         ..Default::default()

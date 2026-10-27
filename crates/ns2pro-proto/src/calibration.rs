@@ -31,12 +31,15 @@ impl StickCalibration {
     /// Decodes nine bytes: center, positive span, negative span.
     #[must_use]
     pub fn decode(raw: &[u8]) -> Option<Self> {
-        let raw: &[u8; 9] = raw.get(..9)?.try_into().ok()?;
-        let pair = |offset: usize| {
-            let (x, y) = unpack_stick12([raw[offset], raw[offset + 1], raw[offset + 2]]);
+        let (center, rest) = raw.split_first_chunk::<3>()?;
+        let (positive, rest) = rest.split_first_chunk::<3>()?;
+        let negative = rest.first_chunk::<3>()?;
+        let pair = |bytes: &[u8; 3]| {
+            let (x, y) = unpack_stick12(*bytes);
             (i32::from(x), i32::from(y))
         };
-        let ((center_x, center_y), (max_x, max_y), (min_x, min_y)) = (pair(0), pair(3), pair(6));
+        let ((center_x, center_y), (max_x, max_y), (min_x, min_y)) =
+            (pair(center), pair(positive), pair(negative));
         Some(Self {
             center_x,
             center_y,
@@ -72,8 +75,9 @@ impl Calibration {
         };
         if let Some(user) = user.filter(|u| u.len() >= USER_BLOCK_MIN_LEN) {
             let user_stick = |offset: usize| {
-                (user[offset..offset + 2] == USER_MAGIC)
-                    .then(|| StickCalibration::decode(&user[offset + 2..]))
+                let (magic, stick) = user.get(offset..)?.split_first_chunk::<2>()?;
+                (*magic == USER_MAGIC)
+                    .then(|| StickCalibration::decode(stick))
                     .flatten()
             };
             if let Some(stick) = user_stick(USER_PRIMARY_OFFSET) {

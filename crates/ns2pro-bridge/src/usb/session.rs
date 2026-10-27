@@ -3,7 +3,7 @@ use crate::channels::Channels;
 use futures::StreamExt;
 use ns2pro_usb::{
     engine::{Effects, UrbEngine},
-    usbip::{MAX_TRANSFER, Urb},
+    usbip::Urb,
 };
 use std::{io, time::Duration};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -13,12 +13,6 @@ async fn read_urb<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<(Urb, Vec<
     reader.read_exact(&mut h).await?;
     let u = Urb::decode(&h).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     let mut data = vec![0; if u.direction == 0 { u.length } else { 0 }];
-    if data.len() > MAX_TRANSFER {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "transfer too large",
-        ));
-    }
     reader.read_exact(&mut data).await?;
     Ok((u, data))
 }
@@ -30,7 +24,7 @@ async fn read_urb<R: AsyncRead + Unpin>(reader: &mut R) -> io::Result<(Urb, Vec<
 ///
 /// # Panics
 ///
-/// If the statistics mutex is poisoned. The URB frame stream itself never ends.
+/// Only if the internal URB frame stream ends, which it never does.
 pub async fn serve_urbs<S: AsyncRead + AsyncWrite + Unpin>(
     stream: S,
     channels: Channels,
@@ -82,6 +76,7 @@ pub async fn serve_urbs<S: AsyncRead + AsyncWrite + Unpin>(
                 engine.on_sample(*input.borrow_and_update(), now(), &mut effects);
             }
             frame = frames.next() => {
+                #[expect(clippy::expect_used, reason = "`unfold` yields read errors as items and never ends")]
                 let (u, data) = frame.expect("URB stream is infinite")?;
                 engine.submit(u, &data, now(), &mut effects);
             }
@@ -96,11 +91,7 @@ pub async fn serve_urbs<S: AsyncRead + AsyncWrite + Unpin>(
             effects.replies.clear();
         }
         if let Some((seq, completions, keepalives)) = effects.take_completion_stats() {
-            channels
-                .stats
-                .lock()
-                .unwrap()
-                .completion(seq, completions, keepalives);
+            crate::sync::lock(&channels.stats).completion(seq, completions, keepalives);
         }
         for output in effects.outputs.drain(..) {
             channels.output(output);

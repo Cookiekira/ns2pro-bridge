@@ -18,6 +18,10 @@ pub const RUMBLE_PACKET_LEN: usize = 42;
 ///
 /// If `payload` is longer than 255 bytes; every caller passes a fixed-size payload.
 #[must_use]
+#[expect(
+    clippy::expect_used,
+    reason = "documented precondition, like slice indexing; callers pass at most 17 bytes"
+)]
 pub fn command(cmd: u8, sub: u8, payload: &[u8]) -> Vec<u8> {
     let len = u8::try_from(payload.len()).expect("command payload fits in one byte");
     let mut out = vec![cmd, 0x91, 0x01, sub, 0x00, len, 0x00, 0x00];
@@ -53,13 +57,13 @@ fn hex(bytes: &[u8]) -> String {
 /// [`ResponseError::Short`] for a response shorter than the header, and
 /// [`ResponseError::Unexpected`] when `cmd` or `sub` do not match.
 pub fn response_payload(response: &[u8], cmd: u8, sub: u8) -> Result<&[u8], ResponseError> {
-    if response.len() < 8 {
+    let &[got_cmd, _, _, got_sub, _, _, _, _, ref payload @ ..] = response else {
         return Err(ResponseError::Short(response.to_vec()));
-    }
-    if response[0] != cmd || response[3] != sub {
+    };
+    if got_cmd != cmd || got_sub != sub {
         return Err(ResponseError::Unexpected(response.to_vec()));
     }
-    Ok(&response[8..])
+    Ok(payload)
 }
 
 #[must_use]
@@ -95,23 +99,23 @@ pub fn spi_read(address: u32, size: u8) -> Vec<u8> {
 /// SPI header, and [`ResponseError::SpiAddress`] when another address was read.
 pub fn spi_read_data(response: &[u8], address: u32) -> Result<&[u8], ResponseError> {
     let payload = response_payload(response, 0x02, 0x04)?;
-    if payload.len() < 8 {
+    let &[len, _, _, _, a0, a1, a2, a3, ref data @ ..] = payload else {
         return Err(ResponseError::ShortSpi);
-    }
-    let got = u32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    };
+    let got = u32::from_le_bytes([a0, a1, a2, a3]);
     if got != address {
         return Err(ResponseError::SpiAddress { want: address, got });
     }
-    let len = usize::from(payload[0]);
-    payload.get(8..8 + len).ok_or(ResponseError::ShortSpi)
+    data.get(..usize::from(len)).ok_or(ResponseError::ShortSpi)
 }
 
 /// `[0, left[16], right[16], 0..]` for [`crate::gatt::Characteristic::Vibration`].
 #[must_use]
 pub fn rumble_packet(left: &[u8; 16], right: &[u8; 16]) -> [u8; RUMBLE_PACKET_LEN] {
     let mut packet = [0u8; RUMBLE_PACKET_LEN];
-    packet[1..17].copy_from_slice(left);
-    packet[17..33].copy_from_slice(right);
+    for (slot, byte) in packet.iter_mut().skip(1).zip(left.iter().chain(right)) {
+        *slot = *byte;
+    }
     packet
 }
 

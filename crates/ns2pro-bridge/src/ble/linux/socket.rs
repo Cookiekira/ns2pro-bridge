@@ -20,6 +20,7 @@ const BT_SECURITY_LOW: u8 = 1;
 const ATT_CID: u16 = 4;
 #[expect(
     clippy::cast_possible_truncation,
+    clippy::as_conversions,
     reason = "AF_BLUETOOTH is 31; sockaddr families are u16 in the kernel ABI"
 )]
 const AF_BLUETOOTH: libc::sa_family_t = libc::AF_BLUETOOTH as libc::sa_family_t;
@@ -27,6 +28,7 @@ const AF_BLUETOOTH: libc::sa_family_t = libc::AF_BLUETOOTH as libc::sa_family_t;
 /// Length argument for a fixed-size socket address or option structure.
 #[expect(
     clippy::cast_possible_truncation,
+    clippy::as_conversions,
     reason = "bounded by the compile-time assertion"
 )]
 const fn socklen<T>() -> libc::socklen_t {
