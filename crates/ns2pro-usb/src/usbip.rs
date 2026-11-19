@@ -5,6 +5,8 @@
 pub struct UsbipError(pub &'static str);
 /// Largest transfer the bridge accepts.
 pub const MAX_TRANSFER: usize = 1024 * 1024;
+/// `number_of_packets` value (-1) that marks a submit as not isochronous.
+const NON_ISOCHRONOUS: u32 = u32::MAX;
 /// A decoded `USBIP_CMD_SUBMIT` or `USBIP_CMD_UNLINK` header.
 #[derive(Clone, Copy, Debug)]
 pub struct Urb {
@@ -62,8 +64,10 @@ impl Urb {
             0
         };
         let (direction, ep) = (word(direction), word(ep));
-        if length > MAX_TRANSFER || direction > 1 || ep > 15 || (command == 1 && word(packets) != 0)
-        {
+        // A non-isochronous submit carries number_of_packets 0 (Linux vhci-hcd) or
+        // 0xffffffff, the protocol's "not isochronous" marker that usbip-win2 sends.
+        let isochronous = command == 1 && !matches!(word(packets), 0 | NON_ISOCHRONOUS);
+        if length > MAX_TRANSFER || direction > 1 || ep > 15 || isochronous {
             return Err(UsbipError(
                 "invalid length, endpoint or isochronous request",
             ));
@@ -240,6 +244,30 @@ mod tests {
         let mut out = Vec::new();
         reply_into(&mut out, urb, 0, &[], 0x1_0000_0007);
         assert_eq!(out[24..28], 7u32.to_be_bytes());
+    }
+
+    fn submit_header(packets: u32) -> [u8; 48] {
+        let mut h = [0; 48];
+        h[..4].copy_from_slice(&1u32.to_be_bytes()); // CMD_SUBMIT
+        h[12..16].copy_from_slice(&1u32.to_be_bytes()); // IN
+        h[24..28].copy_from_slice(&18u32.to_be_bytes()); // device descriptor length
+        h[32..36].copy_from_slice(&packets.to_be_bytes());
+        h
+    }
+
+    #[test]
+    fn non_isochronous_submits_accept_both_wire_markers() {
+        // Linux vhci-hcd sends 0; usbip-win2 sends -1 (0xffffffff).
+        for packets in [0, u32::MAX] {
+            let urb = Urb::decode(&submit_header(packets)).expect("non-isochronous submit");
+            assert_eq!((urb.command, urb.direction, urb.length), (1, 1, 18));
+        }
+        for packets in [1, 8, 1024] {
+            assert!(
+                Urb::decode(&submit_header(packets)).is_err(),
+                "isochronous {packets}"
+            );
+        }
     }
 
     #[test]
