@@ -5,6 +5,16 @@
 pub struct UsbipError(pub &'static str);
 /// Largest transfer the bridge accepts.
 pub const MAX_TRANSFER: usize = 1024 * 1024;
+/// USB/IP management protocol version (1.1.1).
+const USBIP_VERSION: [u8; 2] = [1, 0x11];
+const CMD_SUBMIT: u32 = 1;
+const CMD_UNLINK: u32 = 2;
+const RET_SUBMIT: u32 = 3;
+const RET_UNLINK: u32 = 4;
+const OP_REQ_IMPORT: u16 = 0x8003;
+const OP_REQ_DEVLIST: u16 = 0x8005;
+const OP_REP_DEVLIST: u16 = 0x0005;
+const OP_REPLY_MASK: u16 = 0x7fff;
 /// `number_of_packets` value (-1) that marks a submit as not isochronous.
 const NON_ISOCHRONOUS: u32 = u32::MAX;
 /// A decoded `USBIP_CMD_SUBMIT` or `USBIP_CMD_UNLINK` header.
@@ -55,18 +65,18 @@ impl Urb {
         };
         let word = u32::from_be_bytes;
         let command = word(command);
-        if ![1, 2].contains(&command) {
+        if !matches!(command, CMD_SUBMIT | CMD_UNLINK) {
             return Err(UsbipError("unsupported command"));
         }
-        let length = if command == 1 {
+        let length = if command == CMD_SUBMIT {
             usize::try_from(word(length)).unwrap_or(usize::MAX)
         } else {
             0
         };
         let (direction, ep) = (word(direction), word(ep));
         // A non-isochronous submit carries number_of_packets 0 (Linux vhci-hcd) or
-        // 0xffffffff, the protocol's "not isochronous" marker that usbip-win2 sends.
-        let isochronous = command == 1 && !matches!(word(packets), 0 | NON_ISOCHRONOUS);
+        // 0xffffffff (-1), the protocol's "not isochronous" marker that usbip-win2 sends.
+        let isochronous = command == CMD_SUBMIT && !matches!(word(packets), 0 | NON_ISOCHRONOUS);
         if length > MAX_TRANSFER || direction > 1 || ep > 15 || isochronous {
             return Err(UsbipError(
                 "invalid length, endpoint or isochronous request",
@@ -89,7 +99,7 @@ impl Urb {
     /// [`Self::decode`] does not keep are zero, and `length` keeps its low 32 bits.
     #[must_use]
     pub fn header(self) -> [u8; 48] {
-        let unlink_seq = if self.command == 2 {
+        let unlink_seq = if self.command == CMD_UNLINK {
             self.unlink_seq
         } else {
             0
@@ -128,10 +138,13 @@ const fn wire_length(length: usize) -> u32 {
 }
 /// Appends a `USBIP_RET_SUBMIT` (or `USBIP_RET_UNLINK`) reply for `urb` to `out`.
 pub fn reply_into(out: &mut Vec<u8>, urb: Urb, status: i32, payload: &[u8], actual: usize) {
-    // CMD_UNLINK (2) is answered by RET_UNLINK (4), everything else by RET_SUBMIT (3);
-    // only a submit reply carries actual_length.
-    let command = if urb.command == 2 { 4 } else { 3 };
-    let actual = if urb.command == 1 {
+    // Only a submit reply carries actual_length.
+    let command = if urb.command == CMD_UNLINK {
+        RET_UNLINK
+    } else {
+        RET_SUBMIT
+    };
+    let actual = if urb.command == CMD_SUBMIT {
         wire_length(actual)
     } else {
         0
@@ -166,13 +179,13 @@ impl ManagementRequest {
     pub fn parse(header: &[u8; 8]) -> Self {
         Self {
             op: u16::from_be_bytes([header[2], header[3]]),
-            valid: header[..2] == [1, 0x11] && header[4..] == [0; 4],
+            valid: header[..2] == USBIP_VERSION && header[4..] == [0; 4],
         }
     }
     /// Whether this is `OP_REQ_IMPORT`.
     #[must_use]
     pub const fn is_import(self) -> bool {
-        self.op == 0x8003
+        self.op == OP_REQ_IMPORT
     }
     /// Whether the header is valid and `busid` names the exported device "1-1".
     #[must_use]
@@ -182,28 +195,29 @@ impl ManagementRequest {
     /// Whether the connection stays open for another request (`OP_REQ_DEVLIST`).
     #[must_use]
     pub const fn keep_open(self) -> bool {
-        self.valid && self.op == 0x8005
+        self.valid && self.op == OP_REQ_DEVLIST
     }
     /// The reply to send; an import's `busid` decides whether it succeeds.
     #[must_use]
     pub fn reply(self, busid: Option<&[u8; 32]>) -> Vec<u8> {
         let valid = match self.op {
-            0x8005 => self.valid,
-            0x8003 => busid.is_some_and(|busid| self.valid_busid(busid)),
+            OP_REQ_DEVLIST => self.valid,
+            OP_REQ_IMPORT => busid.is_some_and(|busid| self.valid_busid(busid)),
             _ => false,
         };
-        management_reply(self.op & 0x7fff, valid)
+        management_reply(self.op & OP_REPLY_MASK, valid)
     }
 }
 /// Fixed single-device export. Descriptors and interface classes match VIIPER.
 #[must_use]
 pub fn management_reply(op: u16, valid: bool) -> Vec<u8> {
+    let [ver_hi, ver_lo] = USBIP_VERSION;
     let [op_hi, op_lo] = op.to_be_bytes();
-    let mut b = vec![1, 0x11, op_hi, op_lo, 0, 0, 0, u8::from(!valid)];
+    let mut b = vec![ver_hi, ver_lo, op_hi, op_lo, 0, 0, 0, u8::from(!valid)];
     if !valid {
         return b;
     }
-    if op == 5 {
+    if op == OP_REP_DEVLIST {
         b.extend(1u32.to_be_bytes());
     }
     let mut dev = [0; 312];
@@ -217,7 +231,7 @@ pub fn management_reply(op: u16, valid: bool) -> Vec<u8> {
     dev[296..300].copy_from_slice(&2u32.to_be_bytes());
     dev[300..].copy_from_slice(&[5, 0x7e, 0x20, 0x69, 2, 0, 0xef, 2, 1, 1, 1, 2]);
     b.extend(dev);
-    if op == 5 {
+    if op == OP_REP_DEVLIST {
         b.extend([3, 0, 0, 0, 0xff, 0, 0, 0]);
     }
     b
@@ -231,7 +245,7 @@ mod tests {
     #[cfg(target_pointer_width = "64")]
     fn oversized_lengths_keep_their_low_32_bits() {
         let urb = Urb {
-            command: 1,
+            command: CMD_SUBMIT,
             seq: 0,
             devid: 0,
             direction: 0,
@@ -246,36 +260,41 @@ mod tests {
         assert_eq!(out[24..28], 7u32.to_be_bytes());
     }
 
-    fn submit_header(packets: u32) -> [u8; 48] {
-        let mut h = [0; 48];
-        h[..4].copy_from_slice(&1u32.to_be_bytes()); // CMD_SUBMIT
-        h[12..16].copy_from_slice(&1u32.to_be_bytes()); // IN
-        h[24..28].copy_from_slice(&18u32.to_be_bytes()); // device descriptor length
-        h[32..36].copy_from_slice(&packets.to_be_bytes());
-        h
-    }
-
     #[test]
     fn non_isochronous_submits_accept_both_wire_markers() {
+        let submit = |packets: u32| {
+            let mut h = [0; 48];
+            h[..4].copy_from_slice(&CMD_SUBMIT.to_be_bytes());
+            h[12..16].copy_from_slice(&1u32.to_be_bytes()); // IN
+            h[24..28].copy_from_slice(&18u32.to_be_bytes()); // device descriptor length
+            h[32..36].copy_from_slice(&packets.to_be_bytes());
+            Urb::decode(&h)
+        };
         // Linux vhci-hcd sends 0; usbip-win2 sends -1 (0xffffffff).
-        for packets in [0, u32::MAX] {
-            let urb = Urb::decode(&submit_header(packets)).expect("non-isochronous submit");
-            assert_eq!((urb.command, urb.direction, urb.length), (1, 1, 18));
-        }
-        for packets in [1, 8, 1024] {
-            assert!(
-                Urb::decode(&submit_header(packets)).is_err(),
-                "isochronous {packets}"
+        for packets in [0, NON_ISOCHRONOUS] {
+            let urb = submit(packets).expect("non-isochronous submit");
+            assert_eq!(
+                (urb.command, urb.direction, urb.length),
+                (CMD_SUBMIT, 1, 18)
             );
+        }
+        for packets in [1, 8, 1024, NON_ISOCHRONOUS - 1] {
+            assert!(submit(packets).is_err(), "isochronous {packets}");
         }
     }
 
     #[test]
     fn management_headers_and_import_busids_preserve_reply_contract() {
+        const OP_REP_IMPORT: u16 = OP_REQ_IMPORT & OP_REPLY_MASK;
         let mut busid = [0; 32];
         busid[..3].copy_from_slice(b"1-1");
-        for (op, reply_op) in [(0x8005u16, 5), (0x8003, 3), (0x8006, 6), (5, 5)] {
-            let mut header = [1, 0x11, 0, 0, 0, 0, 0, 0];
+        for (op, reply_op) in [
+            (OP_REQ_DEVLIST, OP_REP_DEVLIST),
+            (OP_REQ_IMPORT, OP_REP_IMPORT),
+            (0x8006, 6),
+            (OP_REP_DEVLIST, OP_REP_DEVLIST),
+        ] {
+            let mut header = [USBIP_VERSION[0], USBIP_VERSION[1], 0, 0, 0, 0, 0, 0];
             header[2..4].copy_from_slice(&op.to_be_bytes());
             for invalid in [None, Some(0), Some(1), Some(4), Some(7)] {
                 let mut header = header;
@@ -283,21 +302,27 @@ mod tests {
                     header[offset] ^= 1;
                 }
                 let request = ManagementRequest::parse(&header);
-                let valid = invalid.is_none() && matches!(op, 0x8005 | 0x8003);
-                assert_eq!(request.is_import(), op == 0x8003);
-                assert_eq!(request.keep_open(), invalid.is_none() && op == 0x8005);
+                let valid = invalid.is_none() && matches!(op, OP_REQ_DEVLIST | OP_REQ_IMPORT);
+                assert_eq!(request.is_import(), op == OP_REQ_IMPORT);
+                assert_eq!(
+                    request.keep_open(),
+                    invalid.is_none() && op == OP_REQ_DEVLIST
+                );
                 assert_eq!(
                     request.reply(Some(&busid)),
                     management_reply(reply_op, valid)
                 );
-                if op == 0x8003 {
+                if op == OP_REQ_IMPORT {
                     assert_eq!(request.valid_busid(&busid), valid);
-                    assert_eq!(request.reply(None), management_reply(3, false));
+                    assert_eq!(request.reply(None), management_reply(OP_REP_IMPORT, false));
                     for offset in [0, 2, 3, 31] {
                         let mut bad_busid = busid;
                         bad_busid[offset] ^= 1;
                         assert!(!request.valid_busid(&bad_busid));
-                        assert_eq!(request.reply(Some(&bad_busid)), management_reply(3, false));
+                        assert_eq!(
+                            request.reply(Some(&bad_busid)),
+                            management_reply(OP_REP_IMPORT, false)
+                        );
                     }
                 }
             }
