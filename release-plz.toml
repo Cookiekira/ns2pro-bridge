@@ -7,5 +7,7 @@ git_tag_enable = false
 [[package]]
 name = "ns2pro-bridge"
 changelog_update = true
+changelog_path = "CHANGELOG.md"
+changelog_include = ["ns2pro-proto", "ns2pro-usb"]
 git_tag_enable = true
 git_tag_name = "v{{ version }}"
